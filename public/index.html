@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VAXON - Sistema Central PRO</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/assets/css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] } } }
+    }
+  </script>
+</head>
+<body class="bg-[#0a0a0a] text-white antialiased overflow-hidden">
+  
+  <!-- AUTH VIEW -->
+  <div id="auth-view" class="fixed inset-0 z-[200] flex items-center justify-center bg-[#0a0a0a]">
+     <div class="bg-neutral-900 border border-neutral-800 p-10 rounded-[2rem] shadow-2xl max-w-sm w-full animate-[fadeInZoom_0.3s_ease-out]">
+        <div class="text-center mb-8">
+           <div class="w-16 h-16 bg-gradient-to-tr from-indigo-500 to-blue-600 rounded-full mx-auto flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/20">
+             <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+           </div>
+           <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-500 tracking-tight">VAXON <span class="bg-indigo-600 px-1.5 py-0.5 rounded-full text-white text-[10px] align-top ml-1">PRO</span></h1>
+           <p class="text-xs text-neutral-500 mt-2">Seguridad Centralizada ERP</p>
+        </div>
+        <form id="login-form" class="space-y-4">
+           <div>
+             <label class="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1 block">Usuario / Email</label>
+             <input type="email" id="login-email" required class="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 outline-none focus:border-indigo-500" placeholder="admin@vaxon.com" value="test@vaxon.com" />
+           </div>
+           <div>
+             <label class="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1 block">Clave Maestra</label>
+             <input type="password" id="login-pass" required class="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 outline-none focus:border-indigo-500" placeholder="••••••••" value="test1234"/>
+           </div>
+           <div id="login-err" class="text-red-400 text-xs font-bold text-center hidden mt-2">Credenciales incorrectas</div>
+           <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 px-4 py-3.5 rounded-xl font-bold text-sm shadow-xl shadow-indigo-500/20 active:scale-95 transition-all mt-6 text-white">Acceder a la Bóveda</button>
+        </form>
+     </div>
+  </div>
+
+  <!-- MAIN VIEW ESCAPE -->
+  <div id="main-view" class="hidden flex h-screen w-full">
+      <!-- Dark backdrop for mobile sidebar -->
+      <div id="sidebar-backdrop" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] hidden transition-opacity" onclick="toggleSidebar()"></div>
+
+      <aside id="sidebar-menu" class="w-64 bg-neutral-950 border-r border-neutral-800 flex-col shadow-2xl fixed inset-y-0 left-0 z-[100] transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 flex">
+        <div class="h-16 flex items-center px-6 border-b border-neutral-800/50 bg-neutral-900/40 justify-between">
+          <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-500">VAXON <span class="text-white text-[10px] bg-indigo-600 px-2 py-0.5 rounded-full ml-1 align-top print:hidden">ERP</span></h1>
+          <button class="md:hidden text-neutral-500 hover:text-white" onclick="toggleSidebar()">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto" id="nav-links">
+          <a href="#" data-view="dashboard" class="nav-link flex items-center px-4 py-3 rounded-xl text-neutral-400 hover:bg-neutral-900 hover:text-white transition-colors">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+            Vista General
+          </a>
+          <a href="#" data-view="inventario" class="nav-link flex items-center px-4 py-3 rounded-xl text-neutral-400 hover:bg-neutral-900 hover:text-white transition-colors">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+            Inventario & Stock
+          </a>
+          <a href="#" data-view="caja" class="nav-link flex items-center px-4 py-3 rounded-xl text-neutral-400 hover:bg-neutral-900 hover:text-white transition-colors">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            Ventas & Caja
+          </a>
+          <a href="#" data-view="finanzas" class="nav-link flex items-center px-4 py-3 rounded-xl text-neutral-400 hover:bg-neutral-900 hover:text-white transition-colors">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path></svg>
+            Gestión Financiera
+          </a>
+          <a href="#" data-view="proveedores" class="nav-link flex items-center px-4 py-3 rounded-xl text-neutral-400 hover:bg-neutral-900 hover:text-white transition-colors">
+            <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+            Proveedores
+          </a>
+        </nav>
+        <div class="p-4 mt-auto">
+            <button id="logout-btn" class="w-full py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 rounded-xl text-xs font-bold transition-colors ring-1 ring-red-500/20 active:scale-95">CERRAR SESIÓN</button>
+        </div>
+      </aside>
+
+      <main class="flex-1 flex flex-col h-full overflow-hidden relative">
+        <header class="h-16 flex items-center justify-between px-4 md:px-8 border-b border-neutral-800/60 bg-neutral-950/80 backdrop-blur-md sticky top-0 z-40">
+          <div class="flex items-center gap-3">
+            <button class="md:hidden text-neutral-400 hover:text-white bg-neutral-900 p-2 rounded-lg" onclick="toggleSidebar()">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+            </button>
+            <h2 id="page-title" class="text-lg md:text-xl font-bold tracking-tight">Cargando...</h2>
+          </div>
+          <div class="flex items-center gap-4">
+            <span id="user-info" class="text-sm font-medium text-neutral-400 block hidden md:block">...</span>
+            <button onclick="NotifEngine.toggle()" class="relative w-8 h-8 flex items-center justify-center rounded-full bg-neutral-800 hover:bg-neutral-700 transition-colors" title="Procesos en segundo plano">
+              <svg class="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+              <span id="notif-badge" class="absolute -top-1 -right-1 bg-indigo-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center" style="display:none;">0</span>
+            </button>
+            <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-sm font-bold shadow-lg shadow-blue-500/20 ring-2 ring-neutral-800 cursor-pointer">A</div>
+          </div>
+        </header>
+
+        <div id="app-content" class="p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto pb-32 h-full">
+        </div>
+      </main>
+
+      <div id="modal-container" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 overflow-y-auto">
+         <div id="modal-content" class="bg-neutral-900 border border-neutral-800 p-8 rounded-[2rem] w-full max-w-xl shadow-2xl relative my-8">
+         </div>
+      </div>
+  </div>
+
+  <!-- NOTIFICATION TRAY (Download-manager style) -->
+  <div id="notif-tray" class="fixed bottom-4 right-4 z-[300] w-[380px] max-h-[420px] flex flex-col pointer-events-none" style="display:none;">
+    <div class="pointer-events-auto bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/60 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden flex flex-col">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-neutral-800/60 bg-neutral-950/60">
+        <span class="text-xs font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+          Procesos
+        </span>
+        <div class="flex items-center gap-2">
+          <span id="notif-count" class="text-[10px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full">0</span>
+          <button onclick="NotifEngine.clearDone()" class="text-[10px] font-bold text-neutral-500 hover:text-white transition-colors">Limpiar</button>
+          <button onclick="NotifEngine.toggle()" class="text-neutral-500 hover:text-white transition-colors ml-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+        </div>
+      </div>
+      <div id="notif-list" class="overflow-y-auto max-h-[320px] divide-y divide-neutral-800/40">
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST CONTAINER (for ephemeral sync toasts) -->
+  <div id="toast-container" class="fixed top-20 right-4 z-[350] flex flex-col gap-2 pointer-events-none w-[340px]">
+  </div>
+
+  <script src="/assets/js/app.js?v=13"></script>
+</body>
+</html>
