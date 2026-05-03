@@ -9,6 +9,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'vaxon_super_secret_key_2026';
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    console.log('Login attempt:', email);
     const { rows } = await db.query('SELECT * FROM "Usuario" WHERE email = $1', [email]);
     const user = rows[0];
 

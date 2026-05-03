@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('./db');
 const cache = require('./cache');
 const { bumpVersion } = require('./sync');
+const { syncProductToCatalog } = require('./catalogSync');
 
 router.get('/', async (req, res) => {
   try {
@@ -37,13 +38,17 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { proveedor_id, producto, modelo, cantidad, precio_compra, precio_venta, imagen_url, usuario_registro, gastos } = req.body;
+    const { proveedor_id, producto, modelo, cantidad, precio_compra, precio_venta, imagen_url, usuario_registro, gastos,
+            catalog_images, catalog_category_id, catalog_contact_id, catalog_description, catalog_whatsapp_msg } = req.body;
     
-    // Inserción Producto
+    // Inserción Producto (con campos de catálogo opcionales)
     const { rows } = await db.query(`
-      INSERT INTO inventario_vaxon (proveedor_id, producto, modelo, cantidad, precio_compra, precio_venta, imagen_url, usuario_registro)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
-    `, [proveedor_id || null, producto, modelo, cantidad, precio_compra, precio_venta, imagen_url, usuario_registro]);
+      INSERT INTO inventario_vaxon (proveedor_id, producto, modelo, cantidad, precio_compra, precio_venta, imagen_url, usuario_registro,
+        catalog_images, catalog_category_id, catalog_contact_id, catalog_description, catalog_whatsapp_msg)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13) RETURNING *
+    `, [proveedor_id || null, producto, modelo, cantidad, precio_compra, precio_venta, imagen_url, usuario_registro,
+        JSON.stringify(catalog_images || []), catalog_category_id || null, catalog_contact_id || null,
+        catalog_description || '', catalog_whatsapp_msg || '']);
     
     const newProd = rows[0];
 
@@ -61,6 +66,9 @@ router.post('/', async (req, res) => {
     cache.del('/api/inventario');
     await bumpVersion();
 
+    // Sync automático al catálogo (fire-and-forget)
+    syncProductToCatalog(newProd).catch(e => console.error('[CatalogSync] Error en POST:', e.message));
+
     res.json(newProd);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -70,27 +78,56 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { producto, modelo, cantidad, precio_compra, precio_venta, proveedor_id, imagen_url } = req.body;
+    const { producto, modelo, cantidad, precio_compra, precio_venta, proveedor_id, imagen_url,
+            catalog_images, catalog_category_id, catalog_contact_id, catalog_description, catalog_whatsapp_msg } = req.body;
     
-    let query = `
-      UPDATE inventario_vaxon 
-      SET producto = $1, modelo = $2, cantidad = $3, precio_compra = $4, precio_venta = $5, proveedor_id = $6
-    `;
+    let paramIdx = 1;
+    let setClauses = [
+      `producto = $${paramIdx++}`, `modelo = $${paramIdx++}`, `cantidad = $${paramIdx++}`,
+      `precio_compra = $${paramIdx++}`, `precio_venta = $${paramIdx++}`, `proveedor_id = $${paramIdx++}`
+    ];
     let params = [producto, modelo, cantidad, precio_compra, precio_venta, proveedor_id || null];
     
     if (imagen_url) {
-       query += `, imagen_url = $7 WHERE id = $8 RETURNING *`;
-       params.push(imagen_url, id);
-    } else {
-       query += ` WHERE id = $7 RETURNING *`;
-       params.push(id);
+       setClauses.push(`imagen_url = $${paramIdx++}`);
+       params.push(imagen_url);
     }
+
+    // Catalog fields (only update if explicitly provided)
+    if (catalog_images !== undefined) {
+      setClauses.push(`catalog_images = $${paramIdx++}::jsonb`);
+      params.push(JSON.stringify(catalog_images || []));
+    }
+    if (catalog_category_id !== undefined) {
+      setClauses.push(`catalog_category_id = $${paramIdx++}`);
+      params.push(catalog_category_id || null);
+    }
+    if (catalog_contact_id !== undefined) {
+      setClauses.push(`catalog_contact_id = $${paramIdx++}`);
+      params.push(catalog_contact_id || null);
+    }
+    if (catalog_description !== undefined) {
+      setClauses.push(`catalog_description = $${paramIdx++}`);
+      params.push(catalog_description || '');
+    }
+    if (catalog_whatsapp_msg !== undefined) {
+      setClauses.push(`catalog_whatsapp_msg = $${paramIdx++}`);
+      params.push(catalog_whatsapp_msg || '');
+    }
+
+    params.push(id);
+    const query = `UPDATE inventario_vaxon SET ${setClauses.join(', ')} WHERE id = $${paramIdx} RETURNING *`;
     
     const { rows } = await db.query(query, params);
     
     cache.del('/api/dashboard/summary');
     cache.del('/api/inventario');
     await bumpVersion();
+
+    // Sync automático al catálogo (fire-and-forget)
+    if (rows[0]) {
+      syncProductToCatalog(rows[0]).catch(e => console.error('[CatalogSync] Error en PUT:', e.message));
+    }
 
     res.json(rows[0]);
   } catch (error) {

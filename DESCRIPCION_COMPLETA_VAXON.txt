@@ -1,0 +1,871 @@
+================================================================================
+                    DESCRIPCIÓN COMPLETA DEL SISTEMA VAXON
+                     Panel Administrativo ERP - Inventario
+================================================================================
+
+Fecha de generación: 17 de Abril de 2026
+Autor del análisis: Antigravity AI (Google DeepMind)
+
+================================================================================
+1. RESUMEN GENERAL
+================================================================================
+
+VAXON es un sistema ERP (Enterprise Resource Planning) web diseñado para la
+gestión integral de un negocio. Funciona como un panel administrativo que
+permite controlar inventario, ventas, caja chica, finanzas (presupuestos,
+comisiones, capital de respaldo) y proveedores.
+
+La aplicación es una SPA (Single Page Application) que combina:
+  - Un backend construido con Express.js (Node.js) que expone una REST API.
+  - Un frontend HTML/JS/CSS estático servido desde la carpeta /public.
+  - Una base de datos PostgreSQL alojada en Aiven Cloud.
+  - Almacenamiento de imágenes en Cloudinary.
+  - Despliegue en Vercel como serverless functions.
+
+URL del repositorio: https://github.com/Samuel7078/inventarioVAXON
+
+
+================================================================================
+2. STACK TECNOLÓGICO
+================================================================================
+
+  COMPONENTE              TECNOLOGÍA                  VERSIÓN
+  ────────────────────    ────────────────────────    ──────────
+  Runtime                 Node.js                     v18+
+  Framework Backend       Express.js                  v5.2.1
+  Base de Datos           PostgreSQL (Aiven Cloud)    --
+  Driver BD               pg (node-postgres)          v8.20.0
+  Autenticación           JSON Web Tokens (JWT)       jose/jsonwebtoken v9
+  Almacenamiento Fotos    Cloudinary                  v2.9.0
+  Frontend                HTML5 + Vanilla JS          --
+  CSS Framework           TailwindCSS (via CDN)       v4
+  Tipografía              Google Fonts (Inter)        --
+  Gráficos                Chart.js (via CDN)          --
+  Deploy                  Vercel (Serverless)         --
+  Linting                 ESLint + Next config        v9
+
+  NOTA: El proyecto tiene dependencias de Next.js (v16) listadas en
+  package.json, pero la aplicación NO usa Next.js como framework activo.
+  Funciona como una aplicación Express pura con archivos estáticos.
+
+
+================================================================================
+3. ARQUITECTURA DE LA APLICACIÓN
+================================================================================
+
+3.1 ESTRUCTURA DE ARCHIVOS
+─────────────────────────
+
+  inventarioVAXON/
+  ├── api/
+  │   └── index.js              ← Punto de entrada principal (Express app)
+  ├── server/
+  │   ├── db.js                 ← Configuración de conexión a PostgreSQL
+  │   ├── auth.js               ← Autenticación (login + middleware JWT)
+  │   ├── dashboard.js          ← API del dashboard (resumen general)
+  │   ├── inventario.js         ← CRUD de productos/inventario
+  │   ├── caja.js               ← Gestión de caja chica y transacciones
+  │   ├── finanzas.js           ← Motor financiero ERP completo
+  │   ├── proveedores.js        ← CRUD de proveedores
+  │   ├── upload.js             ← Subida de imágenes a Cloudinary
+  │   ├── sync.js               ← Motor de sincronización en tiempo real
+  │   └── cache.js              ← Cache en memoria (LRU simplificado)
+  ├── public/
+  │   ├── index.html            ← Página principal (SPA completa)
+  │   └── assets/
+  │       ├── css/style.css     ← Estilos personalizados
+  │       └── js/app.js         ← Lógica completa del frontend (~1415 líneas)
+  ├── database_schema.sql       ← Esquema SQL completo de la BD
+  ├── vercel.json               ← Configuración de deployment en Vercel
+  ├── package.json              ← Dependencias y scripts
+  ├── .env                      ← Variables de entorno (secretas)
+  └── .env.example              ← Plantilla de variables de entorno
+
+
+3.2 FLUJO DE SOLICITUDES (REQUEST FLOW)
+───────────────────────────────────────
+
+  ┌──────────┐    HTTP     ┌──────────────┐    SQL    ┌──────────────┐
+  │ Navegador│ ──────────> │  Express.js  │ ───────── │  PostgreSQL  │
+  │ (HTML/JS)│ <────────── │   (api/)     │ <──────── │  (Aiven)     │
+  └──────────┘             └──────────────┘           └──────────────┘
+       │                         │
+       │  Base64                 │ Upload
+       │                         ▼
+       │                   ┌──────────────┐
+       └──────────────────>│  Cloudinary  │
+                           │  (Imágenes)  │
+                           └──────────────┘
+
+  EN VERCEL:
+  - Todas las rutas /api/* se redirigen a api/index.js via vercel.json
+  - Los archivos estáticos (public/) se sirven directamente
+
+  EN LOCAL:
+  - Express sirve los estáticos desde public/ y la API desde /api/*
+  - Puerto por defecto: 3000
+
+
+================================================================================
+4. BASE DE DATOS - ESQUEMA COMPLETO
+================================================================================
+
+La base de datos PostgreSQL contiene las siguientes 9 tablas:
+
+4.1 TABLA: inventario_vaxon (Tabla Principal de Productos)
+──────────────────────────────────────────────────────────
+  • id                  SERIAL PRIMARY KEY
+  • producto            TEXT NOT NULL          ← Nombre del artículo
+  • modelo              TEXT NOT NULL          ← Modelo/referencia
+  • cantidad            INTEGER DEFAULT 0     ← Stock disponible
+  • precio_compra       DOUBLE PRECISION      ← Costo de adquisición
+  • precio_venta        DOUBLE PRECISION      ← Precio de venta al público
+  • usuario_registro    TEXT NOT NULL          ← Quién lo registró
+  • ultima_actualizacion TIMESTAMP            ← Última modificación
+  • imagen_url          TEXT                   ← URL de la foto en Cloudinary
+  • proveedor_id        INTEGER (FK → Proveedor) ← Proveedor asociado
+
+  NOTAS: Esta tabla es compartida con un bot de Telegram externo.
+         Los campos imagen_url y proveedor_id fueron añadidos después
+         (ALTER TABLE) para no romper compatibilidad con el bot.
+
+
+4.2 TABLA: "Usuario" (Usuarios del Sistema)
+────────────────────────────────────────────
+  • id         SERIAL PRIMARY KEY
+  • email      TEXT UNIQUE NOT NULL
+  • password   TEXT NOT NULL         ← TEXTO PLANO (legacy, sin hash)
+  • nombre     TEXT NOT NULL
+  • rol        TEXT DEFAULT 'ADMIN'
+  • createdAt  TIMESTAMP
+
+  NOTA DE SEGURIDAD: Las contraseñas se almacenan en texto plano.
+  Esto es un sistema legacy que fue migrado de un bot de Telegram.
+
+
+4.3 TABLA: "Proveedor" (Directorio de Proveedores)
+───────────────────────────────────────────────────
+  • id         SERIAL PRIMARY KEY
+  • nombre     TEXT NOT NULL       ← Nombre de la empresa proveedora
+  • contacto   TEXT                ← Información de contacto
+  • createdAt  TIMESTAMP
+
+
+4.4 TABLA: "Gasto_Producto" (Gastos Asociados a Productos)
+──────────────────────────────────────────────────────────
+  • id             SERIAL PRIMARY KEY
+  • producto_id    INTEGER (FK → inventario_vaxon)
+  • tipo           TEXT CHECK ('PORCENTAJE' | 'MONTO_FIJO')
+  • valor          DOUBLE PRECISION
+  • descripcion    TEXT
+  • createdAt      TIMESTAMP
+
+  FUNCIONALIDAD: Permite definir gastos por producto que se DESCUENTAN
+  del precio de compra para calcular el "Costo Neto" real del producto.
+  Ejemplo: Un producto con precio_compra de Bs.100 y un gasto de tipo
+  PORCENTAJE con valor 10 tendría un costoNeto de Bs.90.
+
+
+4.5 TABLA: "Movimiento_Inventario" (Historial de Movimientos)
+─────────────────────────────────────────────────────────────
+  • id             SERIAL PRIMARY KEY
+  • tipo           TEXT NOT NULL
+  • cantidad       INTEGER NOT NULL
+  • fecha          TIMESTAMP
+  • responsable    TEXT NOT NULL
+  • producto_id    INTEGER (FK → inventario_vaxon)
+
+  NOTA: Esta tabla está definida en el esquema pero no se usa activamente
+  desde el frontend actual. Se reserva para auditoría futura.
+
+
+4.6 TABLA: "Caja_Chica" (Sesiones de Caja / Jornadas)
+──────────────────────────────────────────────────────
+  • id              SERIAL PRIMARY KEY
+  • monto_inicial   DOUBLE PRECISION      ← Dinero con el que se abre la caja
+  • monto_final     DOUBLE PRECISION      ← Dinero calculado al cerrar
+  • fecha_apertura  TIMESTAMP
+  • fecha_cierre    TIMESTAMP
+  • estado          TEXT ('ABIERTA' | 'CERRADA')
+  • responsable     TEXT                   ← Quién abrió la caja
+
+  FLUJO: Apertura → Transacciones → Cierre
+  Solo puede haber UNA caja ABIERTA a la vez.
+
+
+4.7 TABLA: "Transaccion_Caja" (Movimientos dentro de una Caja)
+──────────────────────────────────────────────────────────────
+  • id              SERIAL PRIMARY KEY
+  • caja_id         INTEGER (FK → Caja_Chica)  ← A qué caja pertenece
+  • tipo            TEXT ('INGRESO' | 'EGRESO')
+  • monto           DOUBLE PRECISION
+  • descripcion     TEXT
+  • fecha           TIMESTAMP
+  • metodo_pago     TEXT ('EFECTIVO' | 'QR')    ← Medio de pago
+  • producto_id     INTEGER (FK → inventario_vaxon, opcional)
+  • cantidad        INTEGER (opcional)           ← Unidades vendidas
+  • presupuesto_id  INTEGER (FK → Presupuesto, opcional) ← Presupuesto vinculado
+
+  LÓGICA DE VENTAS:
+  - Cuando tipo = 'INGRESO' y hay producto_id + cantidad, el sistema
+    automáticamente descuenta stock del inventario.
+  - Cuando tipo = 'EGRESO' y hay presupuesto_id, el gasto se registra
+    también como movimiento en la tabla Gasto_Presupuesto.
+
+
+4.8 TABLA: "Presupuesto" (Fondos y Etiquetas Financieras)
+─────────────────────────────────────────────────────────
+  • id                      SERIAL PRIMARY KEY
+  • nombre                  TEXT NOT NULL
+  • tipo                    TEXT ('PORCENTAJE' | 'FIJO')
+  • porcentaje_asignacion   DOUBLE PRECISION DEFAULT 0
+  • monto_fijo              DOUBLE PRECISION DEFAULT 0
+  • monto_acumulado         DOUBLE PRECISION DEFAULT 0
+  • color_hex               TEXT
+  • dia_reset               INTEGER (1-28)
+  • ultimo_reset            TIMESTAMP
+
+  TIPOS DE PRESUPUESTO:
+  - PORCENTAJE: Toma un % de la Ganancia Bruta como fondo asignado.
+  - FIJO: Tiene un monto fijo mensual que se resetea automáticamente
+    en el día "dia_reset" de cada mes.
+
+
+4.9 TABLA: "Gasto_Presupuesto" (Movimientos de Presupuestos)
+─────────────────────────────────────────────────────────────
+  • id                SERIAL PRIMARY KEY
+  • presupuesto_id    INTEGER (FK → Presupuesto)
+  • descripcion       TEXT NOT NULL
+  • monto             DOUBLE PRECISION NOT NULL
+  • tipo_movimiento   TEXT ('GASTO' | 'FONDO_EXTRA')
+  • fecha             TIMESTAMP
+
+
+4.10 TABLA: "Comision_Usuario" (Comisiones de Usuarios)
+──────────────────────────────────────────────────────
+  • id            SERIAL PRIMARY KEY
+  • usuario_id    INTEGER UNIQUE (FK → Usuario)
+  • porcentaje    DOUBLE PRECISION DEFAULT 0
+  • activa        BOOLEAN DEFAULT true
+  • createdAt     TIMESTAMP
+
+  FUNCIONALIDAD: Asigna un % de la Ganancia Real a cada usuario.
+  Un usuario solo puede tener UNA comisión activa (constraint UNIQUE).
+
+
+4.11 TABLA: "Capital_Respaldo" (Fondo de Emergencia)
+───────────────────────────────────────────────────
+  • id      SERIAL PRIMARY KEY
+  • monto   DOUBLE PRECISION DEFAULT 0
+
+  FUNCIONALIDAD: Fondo de ahorro manual. Se puede inyectar dinero y
+  también extraer fondos hacia presupuestos específicos cuando estos
+  tienen saldo negativo.
+
+
+4.12 TABLA: "config_sync" (Control de Versión para Sincronización)
+─────────────────────────────────────────────────────────────────
+  • id          INTEGER (siempre 1)
+  • version     INTEGER (auto-incrementable con cada mutación)
+  • ultima_act  TIMESTAMP
+
+  FUNCIONALIDAD: Cada vez que cualquier módulo modifica datos, la
+  versión se incrementa. Los clientes hacen polling cada 4 segundos
+  y si detectan un cambio, recargan la vista automáticamente.
+
+
+================================================================================
+5. MÓDULOS DEL BACKEND (REST API)
+================================================================================
+
+5.1 MÓDULO DE AUTENTICACIÓN (server/auth.js)
+────────────────────────────────────────────
+  RUTA: POST /api/auth/login
+
+  DESCRIPCIÓN: Recibe email y password, busca al usuario en la tabla
+  "Usuario", compara contraseñas en texto plano y si coinciden, genera
+  un JWT (JSON Web Token) que expira en 24 horas.
+
+  PAYLOAD DE ENTRADA:
+    { "email": "test@vaxon.com", "password": "test1234" }
+
+  RESPUESTA EXITOSA:
+    { "token": "eyJhbG...", "user": { "nombre": "...", "rol": "ADMIN" } }
+
+  MIDDLEWARE verifyToken:
+  - Se adjunta al router como router.verifyToken
+  - Intercepta el header "Authorization: Bearer <token>"
+  - Decodifica y valida el JWT
+  - Si es válido, adjunta req.user con los datos del usuario
+  - Si no, retorna 401 o 403
+
+  NOTA: Solo la ruta /api/upload usa explícitamente verifyToken como
+  middleware. Las demás rutas NO verifican autenticación en el backend
+  (la seguridad se maneja solo en el frontend).
+
+
+5.2 MÓDULO DASHBOARD (server/dashboard.js)
+──────────────────────────────────────────
+  RUTA: GET /api/dashboard/summary
+
+  DESCRIPCIÓN: Retorna un resumen general del estado del negocio.
+
+  CÁLCULOS QUE REALIZA:
+  1. Total Valorizado: Suma de (costoNeto × cantidad) de todos los productos.
+     El costoNeto se calcula restando los gastos (Gasto_Producto) del
+     precio_compra de cada producto.
+  2. Productos Bajo Stock: Todos los productos con cantidad < 5 unidades.
+  3. Caja Actual: La caja con estado 'ABIERTA', incluyendo su saldo actual
+     calculado como: monto_inicial + ingresos - egresos.
+
+
+5.3 MÓDULO INVENTARIO (server/inventario.js)
+────────────────────────────────────────────
+  RUTAS:
+    GET    /api/inventario       ← Listar todos los productos
+    POST   /api/inventario       ← Crear nuevo producto
+    PUT    /api/inventario/:id   ← Actualizar producto existente
+
+  GET /api/inventario:
+  - Hace JOIN con Proveedor para obtener el nombre del proveedor
+  - Carga todos los Gasto_Producto y los asocia a cada producto
+  - Calcula el "costoNeto" de cada producto (precio_compra - gastos)
+  - Retorna array de productos enriquecidos
+
+  POST /api/inventario:
+  - Recibe: proveedor_id, producto, modelo, cantidad, precio_compra,
+    precio_venta, imagen_url, usuario_registro, gastos[]
+  - Inserta el producto en la BD
+  - Si hay gastos adicionales, los inserta en Gasto_Producto
+  - Invalida cache y bumpa versión de sincronización
+
+  PUT /api/inventario/:id:
+  - Recibe: producto, modelo, cantidad, precio_compra, precio_venta,
+    proveedor_id, imagen_url (opcional)
+  - Construye query dinámico según si hay imagen o no
+  - Invalida cache y bumpa versión
+
+
+5.4 MÓDULO CAJA CHICA (server/caja.js)
+──────────────────────────────────────
+  RUTAS:
+    GET    /api/caja         ← Obtener caja activa + historial
+    GET    /api/caja/:id     ← Detalle de una caja cerrada específica
+    POST   /api/caja         ← Acciones de caja (apertura/transacción/cierre)
+
+  GET /api/caja:
+  - Busca la caja con estado 'ABIERTA' más reciente
+  - Carga sus transacciones con JOIN a inventario_vaxon
+  - Carga las últimas 20 cajas CERRADAS con resumen (totales)
+
+  POST /api/caja (action: 'APERTURA'):
+  - Crea una nueva fila en Caja_Chica con monto_inicial y responsable
+
+  POST /api/caja (action: 'TRANSACCION'):
+  - Usa TRANSACCIÓN SQL (BEGIN/COMMIT/ROLLBACK)
+  - Inserta en Transaccion_Caja
+  - Si es INGRESO con producto vinculado: descuenta stock del inventario
+  - Si es EGRESO con presupuesto vinculado: registra gasto en Gasto_Presupuesto
+  - Soporta métodos de pago: EFECTIVO y QR
+
+  POST /api/caja (action: 'CIERRE'):
+  - Calcula monto_final: monto_inicial + ingresos - egresos
+  - Actualiza estado a 'CERRADA' y registra fecha_cierre
+
+
+5.5 MÓDULO FINANZAS (server/finanzas.js) — MOTOR FINANCIERO ERP
+───────────────────────────────────────────────────────────────
+  RUTAS:
+    GET    /api/finanzas       ← Dashboard financiero completo
+    GET    /api/finanzas/:id   ← Detalle de un presupuesto con movimientos
+    POST   /api/finanzas       ← Acciones financieras múltiples
+
+  GET /api/finanzas — CÁLCULO JERÁRQUICO FINANCIERO:
+
+  El motor financiero implementa una jerarquía contable:
+
+  ┌──────────────────────────────────┐
+  │  VENTAS TOTALES (ingresosBrutos) │  ← Suma de todas las transacciones
+  │  con producto vinculado          │     tipo INGRESO en caja
+  └────────────────┬─────────────────┘
+                   │
+                   ▼
+  ┌──────────────────────────────────┐
+  │  - CAPITAL INVERTIDO             │  ← precio_compra × cantidad vendida
+  └────────────────┬─────────────────┘
+                   │
+                   ▼
+  ┌──────────────────────────────────┐
+  │  = GANANCIA BRUTA                │  ← ingresosBrutos - capitalInvertido
+  └────────────────┬─────────────────┘
+                   │
+                   ▼
+  ┌──────────────────────────────────┐
+  │  - PRESUPUESTOS (% o fijos)      │  ← Se descuentan los montos asignados
+  └────────────────┬─────────────────┘
+                   │
+                   ▼
+  ┌──────────────────────────────────┐
+  │  = GANANCIA REAL (repartible)    │  ← Lo que queda después de presupuestos
+  └────────────────┬─────────────────┘
+                   │
+                   ▼
+  ┌──────────────────────────────────┐
+  │  - COMISIONES DE USUARIOS        │  ← % de la ganancia real por usuario
+  └────────────────┬─────────────────┘
+                   │
+                   ▼
+  ┌──────────────────────────────────┐
+  │  = GANANCIA NO ASIGNADA          │  ← Dinero libre restante
+  └──────────────────────────────────┘
+
+  PRESUPUESTOS - Cada presupuesto calcula su disponibilidad así:
+    • Si tipo = PORCENTAJE: monto_asignado = (porcentaje / 100) × gananciaBruta
+    • Si tipo = FIJO: monto_asignado = monto_fijo
+    • disponible = monto_asignado + fondos_extra - total_gastado
+
+  RESETS AUTOMÁTICOS:
+    El sistema detecta presupuestos de tipo FIJO cuyo dia_reset ya pasó
+    en el mes actual y no fueron reseteados este mes. Notifica al usuario
+    para que ejecute el reset manualmente.
+
+  CAPITAL DE RESPALDO:
+    Lee el monto del fondo de emergencia (tabla Capital_Respaldo).
+
+  COMISIONES:
+    Calcula el monto de comisión de cada usuario como:
+    monto_comision = (porcentaje / 100) × gananciaReal (solo si > 0)
+
+  POST /api/finanzas — ACCIONES DISPONIBLES:
+
+    CREAR_FONDO              → Crea un nuevo presupuesto (% o fijo)
+    GASTAR_FONDO             → Registra un gasto contra un presupuesto
+    AGREGAR_FONDO_EXTRA      → Inyecta dinero extraordinario a un presupuesto
+    CREAR_COMISION           → Asigna/actualiza comisión de un usuario
+    ELIMINAR_COMISION        → Desactiva la comisión (activa = false)
+    ELIMINAR_PRESUPUESTO     → Borra un presupuesto y sus gastos (CASCADE)
+    RESET_PRESUPUESTO        → Borra todos los gastos del período actual
+    MODIFICAR_PRESUPUESTO    → Actualiza nombre, %, monto, color, día reset
+    AUMENTAR_CAPITAL_RESPALDO → Inyecta dinero al fondo de emergencia
+    DEDUCIR_CAPITAL_RESPALDO  → Extrae dinero del fondo, opcionalmente
+                                inyectándolo como fondo_extra en un presupuesto
+
+
+5.6 MÓDULO PROVEEDORES (server/proveedores.js)
+──────────────────────────────────────────────
+  RUTAS:
+    GET    /api/proveedores       ← Listar todos
+    POST   /api/proveedores       ← Crear nuevo
+    PUT    /api/proveedores/:id   ← Actualizar existente
+    DELETE /api/proveedores/:id   ← Eliminar
+
+
+5.7 MÓDULO UPLOAD (server/upload.js)
+───────────────────────────────────
+  RUTA: POST /api/upload (protegida con verifyToken)
+
+  DESCRIPCIÓN: Recibe una imagen codificada en Base64 y la sube a
+  Cloudinary en la carpeta "vaxon_inventario". Retorna la URL segura.
+
+  NOTA: Se usa Base64 en lugar de multipart/form-data porque Multer
+  tiene problemas de streaming en el entorno serverless de Vercel.
+
+
+5.8 MÓDULO SYNC (server/sync.js)
+──────────────────────────────
+  RUTA: GET /api/sync/version
+
+  FUNCIÓN bumpVersion():
+  - Incrementa el campo "version" en config_sync
+  - Es llamada por TODOS los módulos después de cada mutación (INSERT,
+    UPDATE, DELETE)
+
+  GET /api/sync/version:
+  - Retorna { version: N } — un número que se incrementa con cada cambio
+  - Es ultraligero (~1ms) para ser consultado en polling frecuente
+
+
+5.9 MÓDULO CACHE (server/cache.js)
+─────────────────────────────────
+  DESCRIPCIÓN: Cache en memoria (Map) con TTL de 5 minutos.
+
+  MÉTODOS:
+    get(key)              → Obtener valor (null si expiró)
+    set(key, value, ttl)  → Guardar con TTL opcional
+    del(key)              → Eliminar por clave exacta
+    purgeMatch(str)       → Eliminar todas las claves que contengan "str"
+    clear()               → Limpiar todo el cache
+
+  USO: Se invalida selectivamente después de mutaciones. Actualmente
+  se usa para /api/dashboard/summary y /api/inventario.
+
+
+================================================================================
+6. FRONTEND - INTERFAZ DE USUARIO
+================================================================================
+
+6.1 DESCRIPCIÓN GENERAL
+──────────────────────
+  El frontend es una SPA (Single Page Application) contenida en un solo
+  archivo HTML (public/index.html) con toda la lógica en app.js (~1415 líneas).
+
+  DISEÑO: Dark mode premium con esquema de colores:
+  - Fondo principal: #0a0a0a (negro profundo)
+  - Superficies: neutral-900/950 con bordes neutral-800
+  - Acentos: Indigo (#6366f1), Esmeralda, Rojo, Ámbar
+  - Tipografía: Inter (Google Fonts)
+  - Bordes redondeados: 2rem (rounded-[2rem])
+  - Glassmorphism: backdrop-blur-md en header
+
+  RESPONSIVE: Sidebar colapsable en móvil con backdrop oscuro.
+
+
+6.2 SISTEMA DE AUTENTICACIÓN (Frontend)
+───────────────────────────────────────
+  FLUJO:
+  1. Al cargar la página, checkAuth() verifica si hay token en localStorage.
+  2. Si NO hay token: muestra la pantalla de login (auth-view).
+  3. Si HAY token: oculta login, muestra la app (main-view), carga dashboard.
+  4. Login: envía POST a /api/auth/login → guarda token y datos de usuario
+     en localStorage → recarga la vista.
+  5. Logout: limpia localStorage y recarga.
+
+  ALMACENAMIENTO:
+    localStorage.vaxon_token → JWT del usuario
+    localStorage.vaxon_user  → JSON con nombre y rol
+
+
+6.3 NAVEGACIÓN Y VISTAS
+──────────────────────
+  La app tiene 5 vistas principales accesibles desde el sidebar:
+
+  ┌─────────────────┬────────────────────────────────────────────────────┐
+  │ Vista           │ Descripción                                       │
+  ├─────────────────┼────────────────────────────────────────────────────┤
+  │ dashboard       │ Vista General: cards de resumen financiero y stock │
+  │ inventario      │ Tabla/grid de productos con CRUD completo         │
+  │ caja            │ Módulo de ventas, ingresos, egresos y arqueo      │
+  │ finanzas        │ Motor financiero: presupuestos, comisiones, etc.  │
+  │ proveedores     │ Directorio de proveedores con CRUD                │
+  └─────────────────┴────────────────────────────────────────────────────┘
+
+  SISTEMA DE CACHE DE VISTAS:
+  - Cada vista se cachea en RAM después de ser renderizada.
+  - Cuando el usuario navega a una vista ya visitada, se muestra el HTML
+    cacheado instantáneamente (sin llamar a la API).
+  - El cache se purga (clearCache) después de cada mutación para forzar
+    un re-fetch fresco.
+
+  NAVEGACIÓN:
+  - Los links del sidebar tienen data-view="nombre" y al hacer click
+    llaman a loadView(nombre).
+  - En mobile, el sidebar se cierra automáticamente al navegar.
+
+
+6.4 VISTA: DASHBOARD (Vista General)
+────────────────────────────────────
+  DATOS MOSTRADOS:
+  • Card "Inventario Valorizado": Valor total del stock en Bs.
+  • Card "Saldo en Caja Activa": Saldo actual de la caja abierta.
+  • Tabla "Alertas Stock Crítico": Productos con menos de 5 unidades.
+
+
+6.5 VISTA: INVENTARIO
+─────────────────────
+  DOS MODOS DE VISUALIZACIÓN:
+  • LISTA (list): Tabla con columnas Producto, Proveedor, Unidades, P. Venta
+  • CUADRÍCULA (grid): Tarjetas con foto, nombre, modelo, precios
+
+  FUNCIONALIDADES:
+  • Botón "Vista: LIST/GRID" para alternar visualización.
+  • Botón "+ Nuevo Artículo" → Abre modal con dos modos:
+    - "Producto Nuevo": Formulario completo (nombre, modelo, proveedor,
+      cantidad, p.compra, p.venta, foto).
+    - "Reabastecer Existente": Selector de producto + cantidad a agregar.
+  • Botón "Editar Producto" en cada fila/tarjeta → Modal de edición con
+    posibilidad de reemplazar la foto.
+
+  SUBIDA DE IMÁGENES:
+  1. El usuario selecciona un archivo de imagen.
+  2. Se convierte a Base64 (FileReader.readAsDataURL).
+  3. Se envía a /api/upload como JSON { fileBase64: "data:image/..." }.
+  4. Cloudinary procesa y retorna una URL segura.
+  5. La URL se guarda en el campo imagen_url del producto.
+
+  PROCESO EN SEGUNDO PLANO:
+  - Al hacer submit, el modal se cierra INMEDIATAMENTE.
+  - Una notificación tipo "download-manager" aparece en la esquina inferior
+    derecha mostrando el progreso (subida de foto → guardado en BD).
+  - Si hay error, la notificación muestra los detalles expandibles.
+
+
+6.6 VISTA: VENTAS Y CAJA
+────────────────────────
+  ESTADOS POSIBLES:
+  • SIN CAJA ABIERTA: Muestra botón "Abrir Nueva Jornada" + historial.
+  • CON CAJA ABIERTA: Muestra panel completo con:
+
+  CARDS DE RESUMEN:
+  • Inicio (monto_inicial)
+  • Ingresos totales (desglose efectivo/QR)
+  • Egresos totales
+  • Corte Libre (arqueo = monto_inicial + ingresos - egresos)
+
+  ACCIONES:
+  • "Nueva Venta (Ingreso)": Modal con:
+    - Selector de producto (muestra stock y precio)
+    - Cantidad y precio total (auto-calculado)
+    - Concepto/descripción
+    - Método de cobro (Efectivo o QR)
+  • "Registrar Egreso": Modal con:
+    - Selector de presupuesto (opcional, muestra disponible)
+    - Monto a retirar
+    - Concepto
+
+  CIERRE DE CAJA:
+  • Modal de confirmación con desglose completo:
+    - Efectivo físico esperado (apertura + ventas_efectivo - egresos)
+    - Ventas por QR/Transferencia
+    - Balance total de la jornada
+  • Acción irreversible que marca la caja como CERRADA.
+
+  HISTORIAL:
+  • Lista de las últimas 20 cajas cerradas con:
+    - Fechas de apertura/cierre
+    - Responsable
+    - Totales de ingresos/egresos
+    - Balance final
+    - Botón "Detalles" para ver todas las transacciones
+
+
+6.7 VISTA: GESTIÓN FINANCIERA (ERP)
+───────────────────────────────────
+  Esta es la vista más compleja y potente del sistema.
+
+  FILA 1 - MÉTRICAS PRINCIPALES (4 cards):
+  • Ventas Totales (ingresosBrutos)
+  • Capital Invertido (con sub-card de Capital de Respaldo, borroso por
+    defecto con click para revelar)
+  • Ganancia Bruta
+  • Ganancia Real (Repartible)
+
+  FILA 2 - PRESUPUESTOS (2 columnas):
+  • Columna izquierda: Gráfico de dona (Chart.js) mostrando distribución
+    de dinero entre presupuestos y ganancia real.
+  • Columna derecha: Tarjetas de presupuesto, cada una con:
+    - Nombre y tipo (% o fijo)
+    - Barra de progreso coloreada (verde < 50%, ámbar < 80%, rojo > 80%)
+    - Monto asignado, fondos extra, gastado, disponible
+    - Botones: "Gastar", "+ Fondo", "Detalle"
+    - Botón de editar (ícono lápiz)
+
+  FILA 3 - COMISIONES:
+  • Lista de usuarios con comisión activa
+  • Cada fila muestra: nombre, email, % de comisión, monto calculado
+  • Botones para editar o eliminar comisión
+  • Card final: "Ganancia sin asignar" (lo que sobra)
+
+  MODALES DISPONIBLES:
+  • Crear Presupuesto: nombre, tipo (% o fijo), valor, color, día reset
+  • Editar Presupuesto: mismos campos pero pre-llenados
+  • Gastar Fondo: monto + descripción
+  • Agregar Fondo Extra: inyección extraordinaria con motivo
+  • Detalle de Presupuesto: historial de todos los movimientos
+  • Asignar Comisión: selector de usuario + porcentaje
+  • Editar Comisión: cambiar porcentaje
+  • Manejar Capital de Respaldo: inyectar o extraer fondos
+
+  ALERTAS DE RESET:
+  • Si hay presupuestos fijos pendientes de reset, aparece un toast
+    de advertencia al entrar a la vista.
+
+
+6.8 VISTA: PROVEEDORES
+─────────────────────
+  FUNCIONALIDADES:
+  • Tabla con columnas: Nombre de Empresa, Contacto Directo, Opciones
+  • Botón "+ Registrar Nuevo Proveedor" → Modal con nombre y contacto
+  • Botón "Dar de baja" por fila → Elimina con confirmación
+
+
+6.9 SISTEMA DE NOTIFICACIONES
+─────────────────────────────
+  El sistema tiene DOS tipos de notificaciones:
+
+  A) NOTIFICATION TRAY (Bandeja de procesos):
+  • Ubicado en la esquina inferior derecha
+  • Estilo "download manager" similar al de Chrome
+  • Muestra procesos en segundo plano con:
+    - Spinner animado (en progreso)
+    - Barra de progreso con %
+    - ✓ verde (éxito) / × rojo (error)
+    - Detalles expandibles en caso de error
+  • Badge con contador en el ícono de campana del header
+  • Botón "Limpiar" para remover procesos completados
+  • Auto-dismiss de éxitos después de 8 segundos
+
+  B) TOASTS (Notificaciones efímeras):
+  • Ubicados en la esquina superior derecha
+  • Aparecen brevemente (4 segundos) con animación slide-in/out
+  • Tipos: info (indigo), success (verde), warning (ámbar), sync (azul)
+  • Usados principalmente para alertas de sincronización
+
+  FLUJO DE OPERACIONES CON NOTIFICACIONES:
+  1. Usuario llena formulario y hace submit
+  2. Modal se cierra INMEDIATAMENTE (UX no-bloqueante)
+  3. NotifEngine.addTask() crea una notificación con spinner
+  4. La operación se ejecuta en background (async IIFE)
+  5. updateProgress() actualiza la barra y el texto
+  6. success() o error() al finalizar
+
+
+6.10 MOTOR DE SINCRONIZACIÓN EN TIEMPO REAL
+───────────────────────────────────────────
+  MECANISMO: Polling cada 4 segundos
+
+  FLUJO:
+  1. Al iniciar sesión, startSyncEngine() hace una primera llamada para
+     obtener la versión actual (baseline).
+  2. Cada 4 segundos, consulta GET /api/sync/version.
+  3. Si la versión del servidor es MAYOR que la local:
+     a. Incrementa la versión local
+     b. Purga el cache de vistas
+     c. Muestra toast "Un usuario actualizó datos del sistema"
+     d. Re-renderiza la vista activa silenciosamente (sin loader)
+  4. Cuando el PROPIO usuario hace una mutación:
+     a. bumpVersion() en el servidor incrementa la versión
+     b. _bumpLocalVersion() en el cliente incrementa la versión local
+     c. Esto evita que el polling detecte sus propios cambios como externos
+
+
+================================================================================
+7. SISTEMA DE DESPLIEGUE
+================================================================================
+
+7.1 VERCEL (Producción)
+──────────────────────
+  ARCHIVO: vercel.json
+  {
+    "version": 2,
+    "rewrites": [
+      { "source": "/api/(.*)", "destination": "/api/index.js" }
+    ]
+  }
+
+  FUNCIONAMIENTO:
+  - Los archivos en /public se sirven como estáticos automáticamente.
+  - Todas las rutas /api/* se redirigen a api/index.js que es el entry
+    point de la aplicación Express.
+  - Express se exporta como module.exports = app, lo cual permite a
+    Vercel usarlo como serverless function.
+
+
+7.2 LOCAL (Desarrollo)
+─────────────────────
+  EJECUCIÓN: node api/index.js
+
+  Cuando se ejecuta directamente (require.main === module):
+  - Sirve archivos estáticos desde /public
+  - Escucha en el puerto definido en PORT (default 3000)
+  - Accesible en http://localhost:3000
+
+
+================================================================================
+8. VARIABLES DE ENTORNO REQUERIDAS
+================================================================================
+
+  VARIABLE                  USO                              EJEMPLO
+  ─────────────────────    ──────────────────────           ─────────
+  DATABASE_URL              Connection string PostgreSQL     postgres://user:pass@host/db
+  CLOUDINARY_CLOUD_NAME     Nombre de cloud en Cloudinary    mi_cloud
+  CLOUDINARY_API_KEY        API Key de Cloudinary            123456789
+  CLOUDINARY_API_SECRET     API Secret de Cloudinary         abc123secret
+  N8N_WEBHOOK_URL           URL webhook n8n/Telegram         https://n8n.example.com/...
+  PORT                      Puerto del servidor local        3000
+  JWT_SECRET                Clave secreta para JWT           (fallback hardcodeado)
+
+
+================================================================================
+9. FLUJOS DE NEGOCIO PRINCIPALES
+================================================================================
+
+9.1 FLUJO DE VENTA COMPLETA
+───────────────────────────
+  1. APERTURA: Responsable abre caja con monto inicial.
+  2. VENTA: Selecciona producto → ingresa cantidad → elige método de pago.
+  3. AUTOMÁTICO: Stock se descuenta del inventario.
+  4. REGISTRO: Transacción de tipo INGRESO se registra en la caja.
+  5. EGRESO (opcional): Se registran gastos operativos con/sin presupuesto.
+  6. CIERRE: Al final del día, se cierra la caja con desglose completo.
+
+9.2 FLUJO FINANCIERO
+────────────────────
+  1. Las ventas generan INGRESOS BRUTOS.
+  2. Se resta el CAPITAL INVERTIDO (costo de mercancía vendida).
+  3. Se obtiene GANANCIA BRUTA.
+  4. Se descuentan PRESUPUESTOS (alquiler, marketing, servicios, etc.).
+  5. Se obtiene GANANCIA REAL.
+  6. Se calculan COMISIONES por usuario.
+  7. Lo restante es GANANCIA NO ASIGNADA.
+
+9.3 FLUJO DE INVENTARIO
+──────────────────────
+  1. REGISTRO: Se crea producto con nombre, modelo, cantidades y precios.
+  2. FOTO (opcional): Se sube imagen a Cloudinary via Base64.
+  3. PROVEEDOR (opcional): Se asocia un proveedor al producto.
+  4. GASTOS (opcional): Se registran gastos fijos o porcentuales del producto.
+  5. VENTA: Al venderse, el stock se decrementa automáticamente.
+  6. REABASTECIMIENTO: Se pueden agregar unidades a un producto existente.
+
+
+================================================================================
+10. SEGURIDAD Y CONSIDERACIONES
+================================================================================
+
+  ⚠ ADVERTENCIA: Contraseñas almacenadas en TEXTO PLANO (sin hash).
+    Esto es un sistema legacy migrado de un bot de Telegram.
+
+  ⚠ ADVERTENCIA: NODE_TLS_REJECT_UNAUTHORIZED = "0" está configurado
+    globalmente, lo cual desactiva la verificación de certificados SSL.
+
+  ⚠ ADVERTENCIA: Las rutas de API (excepto /api/upload) NO verifican
+    autenticación en el servidor. La protección es solo del lado del
+    cliente (frontend).
+
+  ✓ JWT con expiración de 24 horas para sesiones de usuario.
+  ✓ CORS habilitado globalmente.
+  ✓ Límite de payload: 50MB para JSON, 20MB para uploads.
+  ✓ Transacciones SQL con BEGIN/COMMIT/ROLLBACK en operaciones críticas.
+  ✓ SSL habilitado para la conexión a PostgreSQL.
+
+
+================================================================================
+11. RESUMEN DE ENDPOINTS DE LA API
+================================================================================
+
+  MÉTODO   RUTA                    DESCRIPCIÓN                     AUTH
+  ──────   ─────────────────────   ─────────────────────────────   ────
+  POST     /api/auth/login         Autenticación de usuario        No
+  GET      /api/dashboard/summary  Resumen del dashboard           No*
+  GET      /api/inventario         Listar productos                No*
+  POST     /api/inventario         Crear producto                  No*
+  PUT      /api/inventario/:id     Actualizar producto             No*
+  GET      /api/caja               Caja activa + historial         No*
+  GET      /api/caja/:id           Detalle de caja cerrada         No*
+  POST     /api/caja               Acciones de caja                No*
+  GET      /api/finanzas           Dashboard financiero            No*
+  GET      /api/finanzas/:id       Detalle de presupuesto          No*
+  POST     /api/finanzas           Acciones financieras            No*
+  GET      /api/proveedores        Listar proveedores              No*
+  POST     /api/proveedores        Crear proveedor                 No*
+  PUT      /api/proveedores/:id    Actualizar proveedor            No*
+  DELETE   /api/proveedores/:id    Eliminar proveedor              No*
+  POST     /api/upload             Subir imagen a Cloudinary       SÍ
+  GET      /api/sync/version       Versión de sincronización       No*
+
+  * No verifican token en el servidor, solo en el frontend.
+
+
+================================================================================
+FIN DEL DOCUMENTO
+================================================================================

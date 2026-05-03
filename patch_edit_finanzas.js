@@ -8,7 +8,7 @@ c = c.replace(presCardsTarget, presCardsReplacement);
 
 // 2. Add Edit icons to Comisiones rendering
 const comisRowTarget = `+ '<div class="flex items-center gap-4"><span class="bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-lg text-sm font-bold font-mono">' + c.porcentaje + '%</span>'`;
-const comisRowReplacement = `+ '<div class="flex items-center gap-4"><button onclick="editarComisionModal(' + c.id + ', ' + c.usuario_id + ', \'' + c.usuario_nombre + '\', ' + c.porcentaje + ')" class="text-neutral-500 hover:text-indigo-400 transition-colors"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button><span class="bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-lg text-sm font-bold font-mono">' + c.porcentaje + '%</span>'`;
+const comisRowReplacement = `+ '<div class="flex items-center gap-4"><button onclick="editarComisionModal(' + c.id + ', ' + c.usuario_id + ', \\'' + c.usuario_nombre + '\\', ' + c.porcentaje + ')" class="text-neutral-500 hover:text-indigo-400 transition-colors"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button><span class="bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-lg text-sm font-bold font-mono">' + c.porcentaje + '%</span>'`;
 c = c.replace(comisRowTarget, comisRowReplacement);
 
 // 3. Add modals right before ejecutarFinanzas

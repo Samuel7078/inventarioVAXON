@@ -19,7 +19,7 @@ window.toggleSidebar = () => {
 };
 `;
 
-c = c.replace('// ====== BOOTSTRAP ======+', toggleFunc + '\n// ====== BOOTSTRAP ======+');
+c = c.replace('// ====== AUTHENTICATION & BOOT ======', toggleFunc + '\n// ====== AUTHENTICATION & BOOT ======');
 if (!c.includes('window.toggleSidebar')) {
     // maybe bootstrap comment is different
     c = toggleFunc + '\n' + c;

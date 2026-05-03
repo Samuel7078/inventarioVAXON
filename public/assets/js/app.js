@@ -317,8 +317,18 @@ window.closeModal = () => { modalContainer.classList.add('hidden'); modalContent
 
 // ====== DASHBOARD ======
 async function renderDashboard() {
-  const data = await api('/dashboard/summary');
+  const [data, finData] = await Promise.all([api('/dashboard/summary'), api('/finanzas')]);
   if (window.currentActiveView !== 'dashboard') return;
+
+  let safeUser = null;
+  let tuGananciaHtml = '';
+  try { safeUser = JSON.parse(localStorage.getItem('vaxon_user')); } catch(e){}
+  if (safeUser) {
+    const miCom = (finData.comisiones || []).find(c => c.usuario_id == safeUser.id || c.usuario_nombre == safeUser.nombre || c.usuario_email == safeUser.email);
+    const monto = miCom ? miCom.monto_comision : 0;
+    tuGananciaHtml = '<div class="mt-4 flex justify-center"><div class="bg-indigo-500/10 border border-indigo-500/20 hover:border-indigo-500/40 p-5 rounded-2xl w-full max-w-md flex justify-between items-center cursor-pointer group transition-colors" onclick="const s=this.querySelector(\'.hidden-monto\'); s.classList.toggle(\'blur-md\'); s.classList.toggle(\'select-none\');"><span class="text-indigo-300 text-sm font-bold tracking-tight">Saldo Personal (' + safeUser.nombre + ')</span><span class="hidden-monto text-2xl font-bold text-indigo-400 font-mono blur-md select-none transition-all duration-300">Bs. ' + monto.toFixed(2) + '</span></div></div>';
+  }
+
   appContent.innerHTML = `
     <div class="space-y-6 animate-[fadeInZoom_0.3s_ease-out]">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -332,6 +342,7 @@ async function renderDashboard() {
           <p class="text-4xl font-bold mt-2 text-emerald-400">Bs. ${data.cajaActual ? data.cajaActual.saldoActual.toFixed(2) : '0.00'}</p>
         </div>
       </div>
+      ${tuGananciaHtml}
       <div class="mt-8 bg-neutral-900 border border-neutral-800 rounded-[2rem] p-8">
         <h3 class="text-lg font-bold mb-5 text-red-500 flex items-center gap-2">Alertas Stock Crítico</h3>
         ${data.productosBajoStock.length > 0 
@@ -351,6 +362,14 @@ let invViewStyle = 'list';
 let currentEgresos = [];
 let allProveedores = [];
 let allProductos = [];
+let allCombos = [];
+let catalogMeta = { categories: [], contacts: [] };
+let invSubTab = 'productos'; // 'productos' | 'combos'
+
+// Load catalog meta once
+async function loadCatalogMeta() {
+  try { catalogMeta = await api('/catalog/meta'); } catch(e) { catalogMeta = { categories: [], contacts: [] }; }
+}
 
 async function renderInventario() {
   const [productos, provs] = await Promise.all([ api('/inventario'), api('/proveedores') ]);
@@ -359,12 +378,23 @@ async function renderInventario() {
   allProveedores = provs;
   allProductos = productos;
 
-  const btnHtml = `
-    <div class="flex justify-between items-center mb-6">
-       <button onclick="invViewStyle = invViewStyle==='list'?'grid':'list'; renderInventario()" class="text-sm bg-neutral-900 px-4 py-2 border border-neutral-800 rounded-xl text-neutral-400">Vista: ${invViewStyle.toUpperCase()}</button>
-       <button onclick="renderModalInventario()" class="bg-indigo-600 px-6 py-3 rounded-2xl shadow-lg font-bold text-sm">+ Nuevo Artículo</button>
+  // Sub-tabs
+  const tabsHtml = `
+    <div class="flex items-center gap-3 mb-6">
+      <div class="bg-neutral-950 p-1.5 rounded-xl border border-neutral-800 flex gap-1.5">
+        <button onclick="invSubTab='productos'; renderInventario()" class="${invSubTab==='productos'?'bg-indigo-600 text-white':'text-neutral-500 hover:text-white'} text-xs font-bold px-5 py-2.5 rounded-lg transition-all">📦 Productos</button>
+        <button onclick="invSubTab='combos'; renderInventarioComboTab()" class="${invSubTab==='combos'?'bg-indigo-600 text-white':'text-neutral-500 hover:text-white'} text-xs font-bold px-5 py-2.5 rounded-lg transition-all">🎁 Combos</button>
+      </div>
+      <div class="flex-1"></div>
+      <button onclick="invViewStyle = invViewStyle==='list'?'grid':'list'; renderInventario()" class="text-sm bg-neutral-900 px-4 py-2 border border-neutral-800 rounded-xl text-neutral-400">Vista: ${invViewStyle.toUpperCase()}</button>
+      <button onclick="renderModalInventario()" class="bg-indigo-600 px-6 py-3 rounded-2xl shadow-lg font-bold text-sm">+ Nuevo Artículo</button>
     </div>
   `;
+
+  if (invSubTab === 'combos') {
+    renderInventarioComboTab();
+    return;
+  }
 
   let contentHtml = '';
   if (invViewStyle === 'grid') {
@@ -411,11 +441,15 @@ async function renderInventario() {
         </table>
       </div>`;
   }
-  appContent.innerHTML = `<div class="animate-[fadeInZoom_0.3s_ease-out]">${btnHtml}${contentHtml}</div>`;
+  appContent.innerHTML = `<div class="animate-[fadeInZoom_0.3s_ease-out]">${tabsHtml}${contentHtml}</div>`;
 }
 
-window.renderModalInventario = () => {
+window.renderModalInventario = async () => {
   currentEgresos = [];
+  await loadCatalogMeta();
+  const catOpts = catalogMeta.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  const conOpts = catalogMeta.contacts.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
   openModal(`
     <h3 class="text-2xl font-bold mb-4">Ingreso de Mercancía</h3>
     <div class="mb-6 bg-neutral-950 p-2 rounded-xl border border-neutral-800 flex gap-2">
@@ -460,12 +494,64 @@ window.renderModalInventario = () => {
          <input type="file" id="inv-file" accept="image/*" class="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-neutral-800 file:text-white" onchange="document.getElementById('inv-preview').src = window.URL.createObjectURL(this.files[0]); document.getElementById('inv-preview').classList.remove('hidden');" />
          <img id="inv-preview" class="hidden mt-3 w-full h-40 rounded-xl object-cover border border-neutral-800 shadow-inner">
       </div>
+
+      <!-- CATALOG SETTINGS COLLAPSIBLE -->
+      <div id="sect-catalog-toggle" class="border border-neutral-800 rounded-2xl overflow-hidden">
+        <button type="button" onclick="document.getElementById('sect-catalog-body').classList.toggle('hidden'); this.querySelector('.cat-arrow').classList.toggle('rotate-180')" class="w-full flex items-center justify-between px-4 py-3 bg-neutral-950 hover:bg-neutral-900 transition-colors text-left">
+          <span class="text-xs font-bold text-amber-400 flex items-center gap-2">⚙ Ajustes para Catálogo <span class="text-neutral-600 font-normal">(Opcional)</span></span>
+          <svg class="cat-arrow w-4 h-4 text-neutral-500 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        </button>
+        <div id="sect-catalog-body" class="hidden p-4 space-y-4 bg-neutral-950/50">
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="text-xs text-neutral-400">Categoría</label>
+              <select id="inv-cat-category" class="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2 outline-none text-sm">
+                <option value="">(Sin categoría)</option>${catOpts}
+              </select>
+            </div>
+            <div><label class="text-xs text-neutral-400">Vendedor / Contacto</label>
+              <select id="inv-cat-contact" class="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2 outline-none text-sm">
+                <option value="">(Sin vendedor)</option>${conOpts}
+              </select>
+            </div>
+          </div>
+          <div><label class="text-xs text-neutral-400">Descripción para Catálogo</label>
+            <textarea id="inv-cat-desc" rows="2" class="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2 outline-none text-sm resize-none" placeholder="Descripción detallada del producto..."></textarea>
+          </div>
+          <div><label class="text-xs text-neutral-400">Mensaje WhatsApp Personalizado</label>
+            <input type="text" id="inv-cat-whatsapp" class="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2 outline-none text-sm" placeholder="Ej: Consultar por tallas disponibles" oninput="updateWhatsappPreview()">
+            <div id="inv-cat-wa-preview" class="mt-2 bg-emerald-950/30 border border-emerald-500/20 p-3 rounded-xl text-xs text-emerald-300">
+              <span class="text-emerald-500 font-bold text-[10px] block mb-1">Vista previa WhatsApp:</span>
+              <span id="inv-cat-wa-text">Hola Vaxon! Estoy Interesad@ en: [NOMBRE] Precio: BS [PRECIO]</span>
+            </div>
+          </div>
+          <div><label class="text-xs text-neutral-400 block mb-1">Imágenes Adicionales para Catálogo</label>
+            <input type="file" id="inv-cat-images" accept="image/*" multiple class="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-neutral-800 file:text-white">
+            <div id="inv-cat-img-preview" class="flex gap-2 mt-2 flex-wrap"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-neutral-800">
          <button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>
          <button type="submit" id="inv-btn-submit" class="bg-indigo-600 px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg text-white whitespace-nowrap">Consolidar Inventario</button>
       </div>
     </form>
   `);
+
+  // Catalog image preview handler
+  const catImgInput = document.getElementById('inv-cat-images');
+  if (catImgInput) {
+    catImgInput.addEventListener('change', function() {
+      const preview = document.getElementById('inv-cat-img-preview');
+      preview.innerHTML = '';
+      Array.from(this.files).forEach(f => {
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(f);
+        img.className = 'w-16 h-16 rounded-lg object-cover border border-neutral-700';
+        preview.appendChild(img);
+      });
+    });
+  }
 };
 
 window.setInvMode = (mode) => {
@@ -514,6 +600,15 @@ window.saveInventario = async (e) => {
     venta: +document.getElementById('inv-venta').value,
     proveedor: document.getElementById('inv-prov')?.value || null,
   };
+
+  // Capture catalog fields
+  const catalogFields = {
+    catalog_category_id: document.getElementById('inv-cat-category')?.value || null,
+    catalog_contact_id: document.getElementById('inv-cat-contact')?.value || null,
+    catalog_description: document.getElementById('inv-cat-desc')?.value || '',
+    catalog_whatsapp_msg: document.getElementById('inv-cat-whatsapp')?.value || '',
+  };
+
   let safeUser = 'ADMIN';
   try { safeUser = JSON.parse(localStorage.getItem('vaxon_user'))?.nombre || 'ADMIN'; } catch(ex){}
 
@@ -526,6 +621,20 @@ window.saveInventario = async (e) => {
       reader.onload = (ev) => resolve(ev.target.result);
       reader.readAsDataURL(fileInput.files[0]);
     });
+  }
+
+  // Capture catalog additional images
+  const catImgInput = document.getElementById('inv-cat-images');
+  let catalogImageDataURLs = [];
+  if (!isRestock && catImgInput && catImgInput.files.length > 0) {
+    for (const file of catImgInput.files) {
+      const dataUrl = await new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target.result);
+        reader.readAsDataURL(file);
+      });
+      catalogImageDataURLs.push(dataUrl);
+    }
   }
 
   const taskLabel = isRestock 
@@ -572,6 +681,18 @@ window.saveInventario = async (e) => {
           imagen_url: targetProduct.imagen_url
         });
       } else {
+        // Upload catalog images if any
+        let catalogImageUrls = [];
+        if (catalogImageDataURLs.length > 0) {
+          NotifEngine.updateProgress(taskId, 75, 'Subiendo imágenes de catálogo...');
+          for (const dataUrl of catalogImageDataURLs) {
+            try {
+              const upRes = await api('/upload', 'POST', { fileBase64: dataUrl });
+              catalogImageUrls.push(upRes.url);
+            } catch(e) { console.error('Error subiendo imagen catálogo:', e); }
+          }
+        }
+
         await api('/inventario', 'POST', {
           proveedor_id: formData.proveedor,
           producto: formData.producto,
@@ -581,7 +702,12 @@ window.saveInventario = async (e) => {
           precio_venta: formData.venta,
           usuario_registro: safeUser,
           imagen_url: img_url,
-          gastos: []
+          gastos: [],
+          catalog_images: catalogImageUrls,
+          catalog_category_id: catalogFields.catalog_category_id ? +catalogFields.catalog_category_id : null,
+          catalog_contact_id: catalogFields.catalog_contact_id ? +catalogFields.catalog_contact_id : null,
+          catalog_description: catalogFields.catalog_description,
+          catalog_whatsapp_msg: catalogFields.catalog_whatsapp_msg
         });
       }
 
@@ -738,13 +864,19 @@ async function renderCaja() {
     const prodInfo = t.nombre_producto ? '| ' + t.nombre_producto : '';
     const colorClass = t.tipo==='INGRESO' ? 'text-emerald-400' : 'text-red-400';
     const sign = t.tipo==='INGRESO' ? '+' : '-';
+    
+    const actionBtns = `<div class="flex gap-2 ml-4">
+        <button onclick="editarTransaccionModal(${t.id}, '${t.descripcion.replace(/'/g, "\\'")}', ${t.monto})" class="text-neutral-500 hover:text-indigo-400 transition-colors" title="Editar"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button>
+        <button onclick="borrarTransaccionCaja(${t.id}, '${t.tipo}', '${t.descripcion.replace(/'/g, "\\'")}', ${t.monto}, ${t.producto_id || 'null'}, ${t.cantidad || 'null'}, ${t.presupuesto_id || 'null'}, '${t.metodo_pago}', ${caja.id})" class="text-neutral-500 hover:text-red-400 transition-colors" title="Eliminar"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+      </div>`;
+
     return '<div class="flex justify-between items-center p-3 mb-2 bg-neutral-950 rounded-xl border border-neutral-800/80">'
       + '<div class="min-w-0 flex-1">'
       + '<span class="font-bold text-sm block truncate">' + t.descripcion + '</span>'
       + '<span class="text-[10px] text-neutral-500 mt-0.5 block">' + icoPago + ' ' + prodInfo + ' · ' + fmtDate(t.fecha) + '</span>'
       + '</div>'
-      + '<span class="font-bold font-mono text-lg flex-shrink-0 ml-3 ' + colorClass + '">' + sign + ' Bs ' + t.monto.toFixed(2) + '</span>'
-      + '</div>';
+      + '<div class="flex items-center"><span class="font-bold font-mono text-lg flex-shrink-0 ml-3 ' + colorClass + '">' + sign + ' Bs ' + t.monto.toFixed(2) + '</span>'
+      + actionBtns + '</div></div>';
   }).join('');
 
   appContent.innerHTML = '<div class="animate-[fadeInZoom_0.3s_ease-out]">'
@@ -798,18 +930,30 @@ window.openAperturaModal = () => {
 };
 
 window.openVentaModal = async (caja_id) => {
-  const inv = await api('/inventario');
-  const optHtml = inv.map(p => '<option value="' + p.id + '" data-price="' + p.precio_venta + '">[Stk: ' + p.cantidad + '] ' + p.producto + ' - Bs. ' + p.precio_venta + '</option>').join('');
+  const [inv, combos] = await Promise.all([api('/inventario'), api('/combos').catch(() => [])]);
+  const optHtml = inv.map(p => '<option value="' + p.id + '" data-price="' + p.precio_venta + '" data-type="product">[Stk: ' + p.cantidad + '] ' + p.producto + ' - Bs. ' + p.precio_venta + '</option>').join('');
+  const comboOptHtml = combos.map(c => '<option value="' + c.id + '" data-price="' + c.precio_venta + '" data-type="combo">🎁 COMBO: ' + c.nombre + ' - Bs. ' + c.precio_venta + '</option>').join('');
   openModal('<div class="flex justify-between items-center mb-4"><h3 class="text-2xl font-bold text-emerald-400">Punto de Venta</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
     + '<form onsubmit="actionCaja(event, \'TRANSACCION\', \'INGRESO\', ' + caja_id + ')" class="space-y-4">'
-    + '<div><label class="text-xs text-neutral-400">Producto (Autodescuento de Stock)</label><select id="trans-prod" class="w-full bg-neutral-950 border border-neutral-800 p-3 rounded-xl text-sm outline-none"><option value="">- Venta Libre Especial -</option>' + optHtml + '</select></div>'
+    + '<input type="hidden" id="trans-combo-id" value="">'
+    + '<div><label class="text-xs text-neutral-400">Producto / Combo (Autodescuento de Stock)</label><select id="trans-prod" class="w-full bg-neutral-950 border border-neutral-800 p-3 rounded-xl text-sm outline-none"><option value="" data-type="">- Venta Libre Especial -</option>' + optHtml + (comboOptHtml ? '<optgroup label="── Combos ──">' + comboOptHtml + '</optgroup>' : '') + '</select></div>'
     + '<div class="grid grid-cols-2 gap-4"><div><label class="text-xs text-neutral-400">Cant.</label><input type="number" id="trans-cant" value="1" min="1" class="w-full bg-neutral-950 border border-emerald-500/30 p-3 text-center font-bold font-mono rounded-xl outline-none" required></div><div><label class="text-xs text-neutral-400">Precio Total (Bs)</label><input type="number" step="0.01" id="trans-monto" class="w-full bg-neutral-950 border border-emerald-500/30 p-3 text-center font-bold text-lg font-mono text-emerald-400 rounded-xl outline-none" required></div></div>'
     + '<div><label class="text-xs text-neutral-400">Concepto</label><input type="text" id="trans-desc" value="Venta Directa" class="w-full bg-neutral-950 border border-neutral-800 p-3 rounded-xl" required></div>'
     + '<div><label class="text-xs text-neutral-400">Cobrado Vía</label><select id="trans-metodo" class="w-full bg-neutral-950 border border-neutral-800 p-3 rounded-xl text-sm outline-none font-bold"><option value="EFECTIVO">🪙 Físico / Efectivo</option><option value="QR">📱 QR / Transferencia</option></select></div>'
     + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button><button class="flex-1 bg-emerald-600 hover:bg-emerald-500 p-3 rounded-xl font-bold shadow-lg active:scale-95 text-white">Efectuar Cobro</button></div>'
     + '</form>');
   document.getElementById('trans-prod').addEventListener('change', function() {
-    const px = this.options[this.selectedIndex].getAttribute('data-price');
+    const opt = this.options[this.selectedIndex];
+    const px = opt.getAttribute('data-price');
+    const type = opt.getAttribute('data-type');
+    const comboIdEl = document.getElementById('trans-combo-id');
+    if (type === 'combo') {
+      comboIdEl.value = this.value;
+      // Clear product value so backend knows it's a combo
+      // The select value will be used for combo_id, not producto_id
+    } else {
+      comboIdEl.value = '';
+    }
     if(px) document.getElementById('trans-monto').value = (parseFloat(px) * parseInt(document.getElementById('trans-cant').value)).toFixed(2);
   });
 };
@@ -911,11 +1055,15 @@ window.actionCaja = async (e, action, tipo=null, caja_id=null) => {
      taskLabel = 'Apertura de Caja: Bs. ' + payload.monto.toFixed(2);
    }
    else if(action==='TRANSACCION') {
+     const comboIdVal = document.getElementById('trans-combo-id') ? document.getElementById('trans-combo-id').value : '';
+     const transProdEl = document.getElementById('trans-prod');
+     const prodSelectType = (transProdEl && transProdEl.options) ? (transProdEl.options[transProdEl.selectedIndex]?.getAttribute('data-type') || '') : '';
      payload = { caja_id, tipo, 
         monto: +document.getElementById('trans-monto').value, 
         descripcion: document.getElementById('trans-desc').value,
         metodo_pago: document.getElementById('trans-metodo').value,
-        producto_id: document.getElementById('trans-prod').value || null,
+        producto_id: (prodSelectType === 'combo' ? null : (document.getElementById('trans-prod').value || null)),
+        combo_id: comboIdVal || null,
         cantidad: document.getElementById('trans-cant').value ? +document.getElementById('trans-cant').value : null,
         presupuesto_id: document.getElementById('trans-presupuesto') ? (document.getElementById('trans-presupuesto').value || null) : null
      };
@@ -938,6 +1086,72 @@ window.actionCaja = async (e, action, tipo=null, caja_id=null) => {
    })();
 }
 
+// Lógica de Edición y Borrado de Transacciones
+window.lastDeletedTx = null;
+
+window.editarTransaccionModal = (id, desc, monto) => {
+  openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Editar Transacción</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
+    + '<form onsubmit="ejecutarEdicionTransaccion(event, ' + id + ')" class="space-y-4">'
+    + '<div><label class="text-xs text-neutral-400">Descripción</label><input type="text" id="edit-tx-desc" value="' + desc + '" required class="w-full bg-neutral-950 border border-neutral-800 p-3 rounded-xl outline-none"></div>'
+    + '<div><label class="text-xs text-neutral-400">Monto (Bs)</label><input type="number" step="0.01" id="edit-tx-monto" value="' + monto + '" required class="w-full bg-neutral-950 border border-neutral-800 p-3 rounded-xl outline-none font-bold font-mono"></div>'
+    + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
+    + '<button class="flex-1 bg-indigo-600 hover:bg-indigo-500 p-3 rounded-xl font-bold shadow-lg text-white">Guardar Cambios</button></div>'
+    + '</form>');
+};
+
+window.ejecutarEdicionTransaccion = async (e, id) => {
+  e.preventDefault();
+  const desc = document.getElementById('edit-tx-desc').value;
+  const monto = +document.getElementById('edit-tx-monto').value;
+  closeModal();
+  const taskId = NotifEngine.addTask('Editando Transacción', 'Actualizando y ajustando dependencias...');
+  try {
+    await api('/caja', 'POST', { action: 'EDITAR_TRANSACCION', payload: { id, descripcion: desc, monto } });
+    NotifEngine.success(taskId, '✓ Transacción actualizada');
+    window.clearCache(); window._bumpLocalVersion();
+    if (window.currentActiveView === 'caja') renderCaja();
+  } catch(err) {
+    NotifEngine.error(taskId, 'Error editando: ' + String(err));
+  }
+};
+
+window.borrarTransaccionCaja = async (id, tipo, desc, monto, prod_id, cant, pres_id, metodo, caja_id) => {
+  const taskId = NotifEngine.addTask('Eliminando Transacción', 'Revirtiendo cambios...');
+  try {
+    await api('/caja', 'POST', { action: 'ELIMINAR_TRANSACCION', payload: { id } });
+    // Guardar para Ctrl+Z
+    window.lastDeletedTx = { action: 'TRANSACCION', payload: { caja_id, tipo, monto, descripcion: desc, metodo_pago: metodo, producto_id: prod_id, cantidad: cant, presupuesto_id: pres_id } };
+    NotifEngine.success(taskId, '✓ Eliminada. Presiona Ctrl+Z para deshacer.');
+    window.clearCache(); window._bumpLocalVersion();
+    if (window.currentActiveView === 'caja') renderCaja();
+  } catch(err) {
+    NotifEngine.error(taskId, 'Error eliminando: ' + String(err));
+  }
+};
+
+window.revertirUltimaTransaccion = async () => {
+  if (!window.lastDeletedTx) return;
+  const tx = window.lastDeletedTx;
+  window.lastDeletedTx = null; // Consume
+  const taskId = NotifEngine.addTask('Deshaciendo', 'Restaurando transacción...');
+  try {
+    await api('/caja', 'POST', tx);
+    NotifEngine.success(taskId, '✓ Transacción restaurada');
+    window.clearCache(); window._bumpLocalVersion();
+    if (window.currentActiveView === 'caja') renderCaja();
+  } catch(err) {
+    NotifEngine.error(taskId, 'Error restaurando: ' + String(err));
+  }
+};
+
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+    if (window.lastDeletedTx) {
+      window.revertirUltimaTransaccion();
+    }
+  }
+});
+
 // ====== FINANZAS V2 ======
 let finanzasData = null;
 
@@ -955,29 +1169,53 @@ async function renderFinanzas() {
   }
 
   const presCards = fin.presupuestos.map(p => {
-    const pctUsado = p.monto_asignado > 0 ? Math.min((p.total_gastado / (p.monto_asignado + p.fondos_extra)) * 100, 100) : 0;
-    const tipoLabel = p.tipo === 'FIJO' ? 'Fijo: Bs. ' + p.monto_fijo.toFixed(2) : p.porcentaje_asignacion + '% de ganancia';
+    const isProductoGlobal = p.alcance === 'PRODUCTO_GLOBAL';
+    const isProductoEsp = p.alcance === 'PRODUCTO_ESPECIFICO';
+    const isProducto = isProductoGlobal || isProductoEsp;
+    
+    const pctUsado = isProducto
+      ? (p.fondos_extra > 0 ? Math.min((p.total_gastado / p.fondos_extra) * 100, 100) : 0)
+      : (p.monto_asignado > 0 ? Math.min((p.total_gastado / (p.monto_asignado + p.fondos_extra)) * 100, 100) : 0);
+    const tipoLabel = isProducto
+      ? (p.tipo === 'FIJO' ? 'Bs.' + p.monto_fijo + '/ud' : p.porcentaje_asignacion + '% x venta')
+      : (p.tipo === 'FIJO' ? 'Fijo: Bs. ' + p.monto_fijo.toFixed(2) : p.porcentaje_asignacion + '% de ganancia');
     const barColor = pctUsado > 80 ? 'bg-red-500' : pctUsado > 50 ? 'bg-amber-500' : 'bg-emerald-500';
-    return '<div class="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl" style="border-left: 4px solid ' + (p.color_hex || '#6366f1') + '">'
-      + '<div class="flex justify-between items-start mb-2"><div><button onclick="editarPresupuestoModal(' + p.id + ')" class="mr-2 text-neutral-500 hover:text-indigo-400 transition-colors"><svg class="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button><span class="font-bold text-base">' + p.nombre + '</span><span class="ml-2 text-[10px] bg-neutral-800 px-2 py-0.5 rounded font-mono text-neutral-400">' + tipoLabel + '</span></div>'
+    
+    const alcanceBadge = isProductoGlobal
+      ? '<span class="ml-2 text-[10px] bg-sky-500/15 text-sky-400 px-2 py-0.5 rounded font-bold">🌎 Todo el Inventario</span>'
+      : isProductoEsp
+        ? '<span class="ml-2 text-[10px] bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded font-bold">📦 ' + (p.producto_nombre || 'Producto') + '</span>'
+        : '<span class="ml-2 text-[10px] bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded font-bold">🏷 General</span>';
+
+    const priorityBadge = '<span class="ml-2 text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded font-mono">#' + p.prioridad + '</span>';
+
+    return '<div class="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl transition-all hover:border-neutral-700" style="border-left: 4px solid ' + (p.color_hex || '#6366f1') + '">'
+      + '<div class="flex justify-between items-start mb-2"><div><button onclick="editarPresupuestoModal(' + p.id + ')" class="mr-2 text-neutral-500 hover:text-indigo-400 transition-colors"><svg class="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button><span class="font-bold text-base">' + p.nombre + '</span>' + alcanceBadge + priorityBadge + '<span class="ml-2 text-[10px] bg-neutral-800 px-2 py-0.5 rounded font-mono text-neutral-400">' + (p.tipo === 'MANUAL' ? 'Manual (Caja fuerte)' : tipoLabel) + '</span></div>'
       + '<span class="text-[10px] font-bold ' + (p.disponible > 0 ? 'text-emerald-400' : 'text-red-400') + '">' + (p.disponible >= 0 ? 'Bs. ' + p.disponible.toFixed(2) : '-Bs. ' + Math.abs(p.disponible).toFixed(2)) + '</span></div>'
       + '<div class="w-full bg-neutral-800 rounded-full h-2 mb-3"><div class="h-2 rounded-full transition-all ' + barColor + '" style="width:' + pctUsado.toFixed(0) + '%"></div></div>'
       + '<div class="flex gap-2 text-[10px] text-neutral-500 mb-3"><span>Asignado: Bs. ' + p.monto_asignado.toFixed(2) + '</span>'
-      + (p.fondos_extra > 0 ? '<span>+ Extra: Bs. ' + p.fondos_extra.toFixed(2) + '</span>' : '')
+      + (p.fondos_extra > 0 ? '<span>+ Extra/Abonos: Bs. ' + p.fondos_extra.toFixed(2) + '</span>' : '')
       + '<span>Gastado: Bs. ' + p.total_gastado.toFixed(2) + '</span></div>'
       + '<div class="flex gap-2">'
       + '<button onclick="gastarFondoModal(' + p.id + ', \'' + p.nombre.replace(/'/g, "\\'") + '\')" class="flex-1 text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 p-2 rounded-lg border border-red-500/10 transition-colors">Gastar</button>'
-      + '<button onclick="agregarFondoExtraModal(' + p.id + ', \'' + p.nombre.replace(/'/g, "\\'") + '\')" class="flex-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 p-2 rounded-lg border border-emerald-500/10 transition-colors">+ Fondo</button>'
-      + '<button onclick="verDetallePresupuesto(' + p.id + ')" class="flex-1 text-[11px] font-bold text-neutral-400 bg-neutral-800 hover:bg-neutral-700 p-2 rounded-lg transition-colors">Detalle</button>'
+      + '<button onclick="transferirFondosModal(' + p.id + ', \'' + p.nombre.replace(/'/g, "\\'") + '\')" class="flex-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 p-2 rounded-lg border border-emerald-500/10 transition-colors">Abonar</button>'
+      + '<button onclick="verDetallePresupuesto(' + p.id + ', ' + p.disponible + ')" class="flex-1 text-[11px] font-bold text-neutral-400 bg-neutral-800 hover:bg-neutral-700 p-2 rounded-lg transition-colors">Detalles</button>'
       + '</div></div>';
   }).join('');
 
   const comisRows = fin.comisiones.map(c => {
-    return '<div class="flex items-center justify-between bg-neutral-950 border border-neutral-800 p-4 rounded-xl">'
-      + '<div><span class="font-bold">' + c.usuario_nombre + '</span><span class="text-xs text-neutral-500 ml-2">' + c.usuario_email + '</span></div>'
-      + '<div class="flex items-center gap-4"><button onclick="editarComisionModal(' + c.id + ', ' + c.usuario_id + ', \\\'' + c.usuario_nombre + '\\\', ' + c.porcentaje + ')" class="text-neutral-500 hover:text-indigo-400 transition-colors"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button><span class="bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-lg text-sm font-bold font-mono">' + c.porcentaje + '%</span>'
-      + '<span class="font-bold font-mono text-lg text-emerald-400">Bs. ' + c.monto_comision.toFixed(2) + '</span>'
-      + '<button onclick="ejecutarFinanzas(null, \' ELIMINAR_COMISION\', null, {comision_id:' + c.id + '})" class="text-red-400 hover:text-red-300 text-xs font-bold">×</button></div></div>';
+    const pctCobrado = c.monto_generado > 0 ? ((c.total_pagado / c.monto_generado) * 100) : 0;
+    return '<div class="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl transition-all hover:border-neutral-700">'
+      + '<div class="flex justify-between items-start mb-3"><div><button onclick="editarComisionModal(' + c.id + ', ' + c.usuario_id + ', \\\'' + c.usuario_nombre + '\\\', ' + c.porcentaje + ')" class="mr-2 text-neutral-500 hover:text-indigo-400 transition-colors" title="Editar %"><svg class="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button><span class="font-bold text-base text-white">' + c.usuario_nombre + '</span><span class="ml-2 text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded font-mono">Comisión: ' + c.porcentaje + '%</span></div>'
+      + '<div class="text-right flex flex-col"><span class="text-[10px] text-neutral-500 uppercase tracking-wider font-bold">Saldo</span><span class="text-xs font-bold text-emerald-400">Bs. ' + c.monto_comision.toFixed(2) + '</span></div></div>'
+      + '<div class="w-full bg-neutral-800 rounded-full h-2 mb-3"><div class="h-2 rounded-full transition-all bg-emerald-500" style="width:' + Math.min(100, pctCobrado).toFixed(0) + '%"></div></div>'
+      + '<div class="flex gap-2 text-[10px] text-neutral-500 mb-4"><span>Generado: Bs. ' + c.monto_generado.toFixed(2) + '</span>'
+      + '<span>Retirado: Bs. ' + c.total_pagado.toFixed(2) + '</span></div>'
+      + '<div class="flex gap-2">'
+      + '<button onclick="abrirPagarComisionModal(' + c.usuario_id + ', ' + c.monto_comision + ', \\\'' + c.usuario_nombre.replace(/'/g, "\\'") + '\\\')" class="flex-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 p-2 rounded-lg border border-emerald-500/10 transition-colors">Pagar Adelanto</button>'
+      + '<button onclick="verDetalleComision(' + c.usuario_id + ', \\\'' + c.usuario_nombre.replace(/'/g, "\\'") + '\\\')" class="flex-1 text-[11px] font-bold text-neutral-400 bg-neutral-800 hover:bg-neutral-700 p-2 rounded-lg transition-colors">Historial</button>'
+      + '<button onclick="ejecutarFinanzas(null, \'ELIMINAR_COMISION\', null, {comision_id:' + c.id + '})" class="text-neutral-500 hover:text-red-400 transition-colors p-2 rounded-lg bg-neutral-800 hover:bg-neutral-700" title="Eliminar"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>'
+      + '</div></div>';
   }).join('');
 
   appContent.innerHTML = '<div class="animate-[fadeInZoom_0.3s_ease-out] space-y-6">'
@@ -1009,11 +1247,11 @@ async function renderFinanzas() {
 
     // ROW 3: Commissions
     + '<div class="bg-neutral-900 border border-neutral-800 p-6 rounded-[2rem]">'
-    + '<div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold tracking-tight">Comisiones de Usuarios</h3>'
+    + '<div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold tracking-tight">Sueldos y Comisiones</h3>'
     + '<button onclick="crearComisionModal()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-xs font-bold shadow-lg text-white">+ Asignar Comisión</button></div>'
-    + '<div class="space-y-2">' + comisRows + '</div>'
-    + (fin.comisiones.length === 0 ? '<p class="text-neutral-600 text-sm py-4 text-center">Sin comisiones asignadas</p>' : '')
-    + '<div class="mt-4 bg-neutral-950 border border-neutral-800 p-4 rounded-xl flex justify-between items-center"><span class="text-sm text-neutral-400">Ganancia sin asignar:</span>'
+    + '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">' + comisRows + '</div>'
+    + (fin.comisiones.length === 0 ? '<p class="text-neutral-600 text-sm py-8 text-center">Sin comisiones asignadas</p>' : '')
+    + '<div class="mt-4 bg-neutral-950 border border-neutral-800 p-4 rounded-xl flex justify-between items-center"><span class="text-sm text-neutral-400">Ganancia sin asignar (Dinero Libre):</span>'
     + '<span class="text-lg font-bold font-mono ' + (m.gananciaNoAsignada >= 0 ? 'text-emerald-400' : 'text-red-400') + '">Bs. ' + m.gananciaNoAsignada.toFixed(2) + '</span></div>'
     + '</div>'
 
@@ -1025,9 +1263,9 @@ async function renderFinanzas() {
     new Chart(ctx, {
       type: 'doughnut',
       data: {
-        labels: [...fin.presupuestos.map(p => p.nombre + (p.tipo === 'FIJO' ? ' (Fijo)' : ' (' + p.porcentaje_asignacion + '%)')), 'Ganancia Real'],
+        labels: [...fin.presupuestos.map(p => p.nombre + (p.tipo === 'FIJO' ? ' (Fijo)' : p.tipo === 'MANUAL' ? ' (Manual)' : ' (' + p.porcentaje_asignacion + '%)')), 'Ganancia Real'],
         datasets: [{
-          data: [...fin.presupuestos.map(p => p.monto_asignado + p.fondos_extra), m.gananciaReal > 0 ? m.gananciaReal : 0],
+          data: [...fin.presupuestos.map(p => Math.max(0, p.monto_asignado + p.fondos_extra)), Math.max(0, m.gananciaReal)],
           backgroundColor: [...fin.presupuestos.map(p => p.color_hex || '#6366f1'), '#10b981'],
           borderWidth: 0
         }]
@@ -1037,24 +1275,71 @@ async function renderFinanzas() {
   }
 }
 
-window.crearPresupuestoModal = () => {
+window.crearPresupuestoModal = async () => {
+  // Fetch products for the product selector
+  let productosOpts = '';
+  try {
+    const inv = await api('/inventario');
+    productosOpts = inv.map(p => '<option value="' + p.id + '">' + p.producto + ' (' + p.modelo + ')</option>').join('');
+  } catch(e) {}
+
   openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Nuevo Presupuesto</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
     + '<form onsubmit="ejecutarFinanzas(event, \'CREAR_FONDO\')" class="space-y-4">'
     + '<div><label class="text-xs text-neutral-400">Nombre de la Etiqueta</label><input type="text" id="fin-nombre" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none" placeholder="Alquiler, Luz, Marketing..."></div>'
-    + '<div><label class="text-xs text-neutral-400">Tipo</label><select id="fin-tipo" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold" onchange="toggleFinTipo()"><option value="PORCENTAJE">Porcentaje de Ganancia Bruta</option><option value="FIJO">Monto Fijo Mensual</option></select></div>'
-    + '<div id="fin-pct-row"><label class="text-xs text-neutral-400">Porcentaje (%)</label><input type="number" step="0.01" id="fin-porcentaje" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono" placeholder="15"></div>'
-    + '<div id="fin-fijo-row" class="hidden"><label class="text-xs text-neutral-400">Monto Fijo (Bs)</label><input type="number" step="0.01" id="fin-monto-fijo" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono" placeholder="350"></div>'
+    + '<div><label class="text-xs text-neutral-400 mb-1 block">Alcance del Presupuesto</label>'
+    + '<div class="bg-neutral-950 p-1.5 rounded-xl border border-neutral-800 flex flex-wrap gap-1.5">'
+    + '<button type="button" id="btn-alcance-GENERAL" onclick="setAlcance(\'GENERAL\')" class="flex-1 bg-indigo-600 text-white text-[10px] font-bold py-2.5 rounded-lg transition-all">🏷 General</button>'
+    + '<button type="button" id="btn-alcance-PRODUCTO_GLOBAL" onclick="setAlcance(\'PRODUCTO_GLOBAL\')" class="flex-1 text-neutral-500 hover:text-white text-[10px] font-bold py-2.5 rounded-lg transition-all">🌎 Todo el Inventario</button>'
+    + '<button type="button" id="btn-alcance-PRODUCTO_ESPECIFICO" onclick="setAlcance(\'PRODUCTO_ESPECIFICO\')" class="flex-1 text-neutral-500 hover:text-white text-[10px] font-bold py-2.5 rounded-lg transition-all">📦 Un Producto</button>'
+    + '</div><input type="hidden" id="fin-alcance" value="GENERAL"></div>'
+    + '<div id="fin-producto-row" class="hidden"><label class="text-xs text-neutral-400">Producto Vinculado</label><select id="fin-producto-id" class="w-full p-3 bg-neutral-950 border border-amber-500/30 rounded-xl outline-none font-bold text-amber-400"><option value="">— Selecciona un producto —</option>' + productosOpts + '</select><p class="text-[10px] text-amber-400/60 mt-1">💡 Cada venta de este producto alimentará automáticamente este presupuesto</p></div>'
+    + '<div><label class="text-xs text-neutral-400">Tipo de Asignación / Cuenta</label><select id="fin-tipo" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold" onchange="toggleFinTipo()"><option value="PORCENTAJE" id="fin-tipo-opt-pct">Porcentaje de Ganancia Bruta (Auto)</option><option value="FIJO">Monto Fijo Mensual (Auto)</option><option value="MANUAL">Cuenta Manual / Personalizada (Solo abonos)</option></select></div>'
+    + '<div id="fin-pct-row"><label class="text-xs text-neutral-400" id="fin-pct-label">Porcentaje (%)</label><input type="number" step="0.01" id="fin-porcentaje" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono" placeholder="15"></div>'
+    + '<div id="fin-fijo-row" class="hidden"><label class="text-xs text-neutral-400" id="fin-fijo-label">Monto Fijo (Bs)</label><input type="number" step="0.01" id="fin-monto-fijo" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono" placeholder="350"></div>'
     + '<div id="fin-reset-row" class="hidden"><label class="text-xs text-neutral-400">Día de Reset Mensual (1-28)</label><input type="number" min="1" max="28" id="fin-dia-reset" value="1" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-mono"></div>'
-    + '<div><label class="text-xs text-neutral-400">Color</label><input type="color" id="fin-color" value="#6366f1" class="w-full h-12 bg-neutral-950 border border-neutral-800 rounded-xl outline-none cursor-pointer"></div>'
+    + '<div class="grid grid-cols-2 gap-4"><div><label class="text-xs text-neutral-400">Color</label><input type="color" id="fin-color" value="#6366f1" class="w-full h-12 bg-neutral-950 border border-neutral-800 rounded-xl outline-none cursor-pointer"></div>'
+    + '<div><label class="text-xs text-neutral-400">Prioridad Ejecución</label><input type="number" id="fin-prioridad" value="1" min="1" class="w-full h-12 p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold text-center"></div></div>'
     + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
     + '<button class="flex-1 bg-indigo-600 hover:bg-indigo-500 p-3 rounded-xl font-bold shadow-lg text-white">Crear Presupuesto</button></div></form>');
+};
+
+window.setAlcance = (alcance) => {
+  document.getElementById('fin-alcance').value = alcance;
+  const ids = ['GENERAL', 'PRODUCTO_GLOBAL', 'PRODUCTO_ESPECIFICO'];
+  ids.forEach(id => {
+    const btn = document.getElementById('btn-alcance-' + id);
+    if (!btn) return;
+    if (id === alcance) {
+       btn.className = 'flex-1 ' + (alcance === 'GENERAL' ? 'bg-indigo-600' : alcance === 'PRODUCTO_GLOBAL' ? 'bg-sky-600' : 'bg-amber-600') + ' text-white text-[10px] font-bold py-2.5 rounded-lg transition-all';
+    } else {
+       btn.className = 'flex-1 text-neutral-500 hover:text-white text-[10px] font-bold py-2.5 rounded-lg transition-all';
+    }
+  });
+
+  const prodRow = document.getElementById('fin-producto-row');
+  const pctOptEl = document.getElementById('fin-tipo-opt-pct');
+  const pctLabel = document.getElementById('fin-pct-label');
+  const fijoLabel = document.getElementById('fin-fijo-label');
+  
+  const isProd = alcance !== 'GENERAL';
+  prodRow.classList.toggle('hidden', alcance !== 'PRODUCTO_ESPECIFICO');
+  
+  if (isProd) {
+    if (pctOptEl) pctOptEl.textContent = 'Porcentaje de cada Venta';
+    if (pctLabel) pctLabel.textContent = '% de cada venta que se acumula';
+    if (fijoLabel) fijoLabel.textContent = 'Monto fijo por unidad vendida (Bs)';
+  } else {
+    if (pctOptEl) pctOptEl.textContent = 'Porcentaje de Ganancia Bruta';
+    if (pctLabel) pctLabel.textContent = 'Porcentaje (%)';
+    if (fijoLabel) fijoLabel.textContent = 'Monto Fijo (Bs)';
+  }
 };
 
 window.toggleFinTipo = () => {
   const tipo = document.getElementById('fin-tipo').value;
   document.getElementById('fin-pct-row').classList.toggle('hidden', tipo !== 'PORCENTAJE');
   document.getElementById('fin-fijo-row').classList.toggle('hidden', tipo !== 'FIJO');
-  document.getElementById('fin-reset-row').classList.toggle('hidden', tipo !== 'FIJO');
+  document.getElementById('fin-reset-row').classList.toggle('hidden', tipo === 'MANUAL');
 };
 
 window.gastarFondoModal = (id, nombre) => {
@@ -1066,17 +1351,47 @@ window.gastarFondoModal = (id, nombre) => {
     + '<button class="flex-1 bg-red-600 hover:bg-red-500 p-3 rounded-xl font-bold text-white">Confirmar Gasto</button></div></form>');
 };
 
-window.agregarFondoExtraModal = (id, nombre) => {
-  openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Fondo Extra: \'' + nombre + '\'</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
-    + '<form onsubmit="ejecutarFinanzas(event, \'AGREGAR_FONDO_EXTRA\', ' + id + ')" class="space-y-4">'
-    + '<div><label class="text-xs text-neutral-400">Monto Extraordinario (Bs)</label><input type="number" step="0.01" id="fin-gasto-monto" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono text-center text-3xl text-emerald-400"></div>'
-    + '<div><label class="text-xs text-neutral-400">Descripción</label><input type="text" id="fin-gasto-desc" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none" placeholder="Fondo extra mes de diciembre..."></div>'
+window.transferirFondosModal = (destinoId, nombreDestino) => {
+  const fin = finanzasData;
+  if(!fin) return;
+  // Options for source
+  let origenOpts = '<option value="GANANCIA_REAL">Ganancia Real (Disponible: Bs. ' + fin.metricas.gananciaReal.toFixed(2) + ')</option>';
+  fin.presupuestos.forEach(p => {
+    if (p.id !== destinoId) {
+      origenOpts += '<option value="' + p.id + '">' + p.nombre + ' (Disp: Bs. ' + p.disponible.toFixed(2) + ')</option>';
+    }
+  });
+
+  openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Abonar a \'' + nombreDestino + '\'</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
+    + '<p class="text-xs text-neutral-400 mb-4">Transfiere dinero manualmente desde la ganancia u otras cuentas.</p>'
+    + '<form onsubmit="enviarTransferencia(event, ' + destinoId + ')" class="space-y-4">'
+    + '<div><label class="text-xs text-neutral-400">Cuenta de Origen</label><select id="fin-transf-origen" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold text-indigo-400">' + origenOpts + '</select></div>'
+    + '<div><label class="text-xs text-neutral-400">Monto a Transferir (Bs)</label><input type="number" step="0.01" id="fin-transf-monto" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono text-center text-3xl text-emerald-400"></div>'
+    + '<div><label class="text-xs text-neutral-400">Descripción / Motivo</label><input type="text" id="fin-transf-desc" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none" placeholder="Abono manual..."></div>'
     + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
-    + '<button class="flex-1 bg-emerald-600 hover:bg-emerald-500 p-3 rounded-xl font-bold text-white">Inyectar Fondo</button></div></form>');
+    + '<button class="flex-1 bg-emerald-600 hover:bg-emerald-500 p-3 rounded-xl font-bold text-white shadow-lg shadow-emerald-500/20">Realizar Transferencia</button></div></form>');
 };
 
-window.verDetallePresupuesto = async (id) => {
+window.enviarTransferencia = async (e, destinoId) => {
+  e.preventDefault();
+  const origenVal = document.getElementById('fin-transf-origen').value;
+  const monto = +document.getElementById('fin-transf-monto').value;
+  const desc = document.getElementById('fin-transf-desc').value;
+  
+  let origen_tipo = 'PRESUPUESTO';
+  let origen_id = origenVal;
+  if (origenVal === 'GANANCIA_REAL') {
+    origen_tipo = 'GANANCIA_REAL';
+    origen_id = null;
+  }
+
+  const payload = { destino_id: destinoId, origen_tipo, origen_id, monto, descripcion: desc };
+  ejecutarFinanzas(null, 'TRANSFERIR_FONDOS', null, payload);
+};
+
+window.verDetallePresupuesto = async (id, dispCalculado) => {
   const p = await api('/finanzas/' + id);
+  const disponible = dispCalculado !== undefined ? dispCalculado : 0;
   const fmtDate = (d) => { if(!d) return '-'; const dt = new Date(d); return dt.toLocaleDateString('es-BO', {day:'2-digit',month:'short'}) + ' ' + dt.toLocaleTimeString('es-BO', {hour:'2-digit',minute:'2-digit'}); };
   const movs = (p.movimientos || []).map(m => {
     const isGasto = m.tipo_movimiento === 'GASTO';
@@ -1091,13 +1406,34 @@ window.verDetallePresupuesto = async (id) => {
 
   openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">' + p.nombre + '</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
     + '<div class="grid grid-cols-3 gap-3 mb-4 text-sm"><div class="bg-neutral-950 p-3 rounded-xl text-center"><p class="text-[10px] text-neutral-500">Gastos</p><p class="font-bold text-red-400 font-mono">-' + totalGastos.toFixed(2) + '</p></div>'
-    + '<div class="bg-neutral-950 p-3 rounded-xl text-center"><p class="text-[10px] text-neutral-500">Fondos Extra</p><p class="font-bold text-emerald-400 font-mono">+' + totalFondos.toFixed(2) + '</p></div>'
-    + '<div class="bg-neutral-950 p-3 rounded-xl text-center"><p class="text-[10px] text-neutral-500">Tipo</p><p class="font-bold text-indigo-400">' + (p.tipo === 'FIJO' ? 'Fijo: Bs.' + p.monto_fijo : p.porcentaje_asignacion + '%') + '</p></div></div>'
-    + (p.tipo === 'FIJO' ? '<div class="bg-amber-950/30 border border-amber-500/20 p-3 rounded-xl text-xs mb-4 flex justify-between"><span class="text-amber-400">Reset mensual el día ' + p.dia_reset + '</span><button onclick="resetPresupuesto(' + p.id + ', \'' + p.nombre.replace(/'/g, "\\'") + '\')" class="text-amber-400 font-bold hover:text-amber-300 underline">Resetear ahora</button></div>' : '')
-    + '<div class="overflow-y-auto max-h-[300px] space-y-2"><h4 class="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">Movimientos (' + (p.movimientos || []).length + ')</h4>'
+    + '<div class="bg-neutral-950 p-3 rounded-xl text-center"><p class="text-[10px] text-neutral-500">Abonos Extra</p><p class="font-bold text-emerald-400 font-mono">+' + totalFondos.toFixed(2) + '</p></div>'
+    + '<div class="bg-neutral-950 p-3 rounded-xl text-center"><p class="text-[10px] text-neutral-500">Tipo</p><p class="font-bold text-indigo-400">' + (p.tipo === 'FIJO' ? 'Fijo: Bs.' + p.monto_fijo : p.tipo === 'MANUAL' ? 'Manual' : p.porcentaje_asignacion + '%') + '</p></div></div>'
+    + '<div class="bg-neutral-900 border border-neutral-800 p-4 rounded-xl text-sm mb-4 flex justify-between items-center"><div class="flex flex-col">'
+    + '<span class="text-neutral-400 text-xs">Saldo actual disponible:</span><span class="text-lg font-bold font-mono ' + (disponible > 0 ? 'text-emerald-400' : disponible < 0 ? 'text-red-400' : 'text-neutral-300') + '">Bs. ' + disponible.toFixed(2) + '</span>'
+    + (p.tipo === 'FIJO' && disponible < p.monto_fijo ? '<span class="text-[10px] text-amber-500 font-bold mt-1">Faltan Bs. ' + (p.monto_fijo - disponible).toFixed(2) + ' para completar meta.</span>' : '')
+    + '</div><button onclick="liquidarPresupuesto(' + p.id + ', \'' + p.nombre.replace(/'/g, "\\'") + '\', ' + disponible + ')" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg font-bold shadow-lg text-white transition-colors">Liquidar / Pagar Todo</button></div>'
+    + '<div class="overflow-y-auto max-h-[300px] space-y-2"><h4 class="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">Historial de Movimientos (' + (p.movimientos || []).length + ')</h4>'
     + movs
     + ((p.movimientos || []).length === 0 ? '<p class="text-neutral-600 text-sm py-4 text-center">Sin movimientos</p>' : '')
     + '</div>');
+};
+
+window.liquidarPresupuesto = async (id, nombre, disponible) => {
+  if (disponible <= 0) {
+    alert('No hay saldo disponible para liquidar en la cuenta "' + nombre + '".');
+    return;
+  }
+  if (!confirm('¿Liquidar el periodo de "' + nombre + '"? Se generará un pago de Bs. ' + disponible.toFixed(2) + ' dejando la cuenta en cero.')) return;
+  const taskId = NotifEngine.addTask('Liquidando: ' + nombre, 'Registrando pago...');
+  try {
+    await api('/finanzas', 'POST', {action: 'LIQUIDAR_PRESUPUESTO', payload: {presupuesto_id: id, disponible}});
+    NotifEngine.success(taskId, '✓ Cuenta liquidada y reiniciada a 0');
+    window.clearCache(); window._bumpLocalVersion();
+    closeModal();
+    if (window.currentActiveView === 'finanzas') renderFinanzas();
+  } catch(err) {
+    NotifEngine.error(taskId, 'Error: ' + String(err));
+  }
 };
 
 window.resetPresupuesto = async (id, nombre) => {
@@ -1319,15 +1655,42 @@ window.editarPresupuestoModal = (id) => {
   
   openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Editar Presupuesto</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
     + '<form onsubmit="ejecutarFinanzas(event, \'MODIFICAR_PRESUPUESTO\', ' + id + ')" class="space-y-4">'
-    + '<div><label class="text-xs text-neutral-400">Nombre de la Etiqueta</label><input type="text" id="fin-mod-nombre" value="' + p.nombre + '" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none"></div>'
-    + (p.tipo === 'PORCENTAJE' ? '<div><label class="text-xs text-neutral-400">Porcentaje de Ganancia (%)</label><input type="number" step="0.01" id="fin-mod-porcentaje" value="' + p.porcentaje_asignacion + '" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono"></div>' 
-                               : '<div><label class="text-xs text-neutral-400">Monto Fijo Mensual (Bs)</label><input type="number" step="0.01" id="fin-mod-fijo" value="' + p.monto_fijo + '" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono"></div>'
-                               + '<div><label class="text-xs text-neutral-400">Día de Reset Mensual</label><input type="number" min="1" max="28" id="fin-mod-reset" value="' + p.dia_reset + '" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-mono"></div>')
-    + '<input type="hidden" id="fin-mod-tipo" value="' + p.tipo + '">'
-    + '<div><label class="text-xs text-neutral-400">Color</label><input type="color" id="fin-mod-color" value="' + p.color_hex + '" class="w-full h-12 bg-neutral-950 border border-neutral-800 rounded-xl outline-none cursor-pointer"></div>'
-    + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
+    + '<div><label class="text-xs text-neutral-400">Nombre de la Etiqueta / Cuenta</label><input type="text" id="fin-mod-nombre" value="' + p.nombre + '" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none"></div>'
+    + '<div><label class="text-xs text-neutral-400">Tipo de Cuenta</label><select id="fin-mod-tipo" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold" onchange="toggleFinModTipo()">'
+    + '<option value="PORCENTAJE" ' + (p.tipo==='PORCENTAJE'?'selected':'') + '>Porcentaje (%)</option>'
+    + '<option value="FIJO" ' + (p.tipo==='FIJO'?'selected':'') + '>Fijo Mensual</option>'
+    + '<option value="MANUAL" ' + (p.tipo==='MANUAL'?'selected':'') + '>Manual / Personalizado</option></select></div>'
+    + '<div id="fin-mod-pct-row" class="' + (p.tipo==='PORCENTAJE'?'':'hidden') + '"><label class="text-xs text-neutral-400">Porcentaje (%)</label><input type="number" step="0.01" id="fin-mod-porcentaje" value="' + p.porcentaje_asignacion + '" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono"></div>' 
+    + '<div id="fin-mod-fijo-row" class="' + (p.tipo==='FIJO'?'':'hidden') + '"><label class="text-xs text-neutral-400">Monto Fijo Mensual (Bs)</label><input type="number" step="0.01" id="fin-mod-fijo" value="' + p.monto_fijo + '" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono"></div>'
+    + '<div id="fin-mod-reset-row" class="' + (p.tipo==='MANUAL'?'hidden':'') + '"><label class="text-xs text-neutral-400">Día de Reset Mensual</label><input type="number" min="1" max="28" id="fin-mod-reset" value="' + p.dia_reset + '" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-mono"></div>'
+    + '<div class="grid grid-cols-2 gap-4"><div><label class="text-xs text-neutral-400">Color</label><input type="color" id="fin-mod-color" value="' + p.color_hex + '" class="w-full h-12 bg-neutral-950 border border-neutral-800 rounded-xl outline-none cursor-pointer"></div>'
+    + '<div><label class="text-xs text-neutral-400">Prioridad</label><input type="number" id="fin-mod-prioridad" value="' + p.prioridad + '" min="1" class="w-full h-12 p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold text-center"></div></div>'
+    + '<div class="flex gap-3 mt-4">'
+    + '<button type="button" onclick="eliminarPresupuesto(' + id + ', \'' + p.nombre.replace(/'/g, "\\'") + '\')" class="px-4 py-2.5 text-sm font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-xl border border-red-500/10 transition-colors">Eliminar</button>'
+    + '<button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
     + '<button class="flex-1 bg-indigo-600 hover:bg-indigo-500 p-3 rounded-xl font-bold shadow-lg text-white">Actualizar</button></div>'
     + '</form>');
+};
+
+window.toggleFinModTipo = () => {
+  const tipo = document.getElementById('fin-mod-tipo').value;
+  document.getElementById('fin-mod-pct-row').classList.toggle('hidden', tipo !== 'PORCENTAJE');
+  document.getElementById('fin-mod-fijo-row').classList.toggle('hidden', tipo !== 'FIJO');
+  document.getElementById('fin-mod-reset-row').classList.toggle('hidden', tipo === 'MANUAL');
+};
+
+window.eliminarPresupuesto = async (id, nombre) => {
+  if (!confirm('¿Estás seguro de que deseas eliminar permanentemente el presupuesto "' + nombre + '"? Se perderá todo su historial de gastos y fondos extra. Esta acción no se puede deshacer.')) return;
+  const taskId = NotifEngine.addTask('Eliminando: ' + nombre, 'Borrando presupuesto...');
+  try {
+    await api('/finanzas', 'POST', {action: 'ELIMINAR_PRESUPUESTO', payload: {presupuesto_id: id}});
+    NotifEngine.success(taskId, '✓ Presupuesto eliminado');
+    window.clearCache(); window._bumpLocalVersion();
+    closeModal();
+    if (window.currentActiveView === 'finanzas') renderFinanzas();
+  } catch(err) {
+    NotifEngine.error(taskId, 'Error: ' + String(err));
+  }
 };
 
 window.editarComisionModal = (comisionId, usuarioId, nombre, porcentajeActual) => {
@@ -1341,6 +1704,36 @@ window.editarComisionModal = (comisionId, usuarioId, nombre, porcentajeActual) =
     + '</form>');
 };
 
+window.abrirPagarComisionModal = (usuarioId, maxMonto, nombre) => {
+  if (maxMonto <= 0) return NotifEngine.error('Sin saldo pendiente', 'El usuario no tiene comisiones por cobrar actualmente.');
+  openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold text-emerald-400">Pagar Sueldo / Comisión</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
+    + '<p class="text-sm text-neutral-400 mb-6">Usuario: <strong class="text-white">' + nombre + '</strong><br>Saldo Pendiente: <strong class="text-emerald-400 font-mono">Bs. ' + maxMonto.toFixed(2) + '</strong></p>'
+    + '<form onsubmit="ejecutarFinanzas(event, \'PAGAR_COMISION\')" class="space-y-4">'
+    + '<input type="hidden" id="pagar-comision-usuario" value="' + usuarioId + '">'
+    + '<div><label class="text-xs text-neutral-400">Monto a Pagar (Bs.)</label><input type="number" step="0.01" max="' + maxMonto + '" id="pagar-comision-monto" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono text-2xl text-center text-emerald-400"></div>'
+    + '<div><label class="text-xs text-neutral-400">Concepto / Descripción</label><input type="text" id="pagar-comision-desc" placeholder="Ej. Pago parcial mes de abril" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none text-sm"></div>'
+    + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
+    + '<button class="flex-1 bg-emerald-600 hover:bg-emerald-500 p-3 rounded-xl font-bold text-white shadow-lg shadow-emerald-500/20">Confirmar Pago</button></div>'
+    + '</form>');
+};
+
+window.verDetalleComision = (usuarioId, nombre) => {
+  const fin = finanzasData;
+  if (!fin) return;
+  const userPagos = (fin.historialPagos || []).filter(p => p.usuario_id === usuarioId);
+  const histHtml = userPagos.length > 0 ? userPagos.map(p => `
+    <div class="bg-neutral-950 p-4 rounded-xl border border-neutral-800 flex justify-between items-center hover:border-neutral-700 transition-colors">
+      <div><p class="font-bold text-sm text-indigo-300">\${p.descripcion}</p><p class="text-[11px] text-neutral-500">\${new Date(p.fecha).toLocaleString()}</p></div>
+      <div class="font-mono text-emerald-400 font-bold text-right text-lg">- Bs. \${p.monto.toFixed(2)}</div>
+    </div>
+  `).join('') : '<p class="text-sm text-neutral-500 text-center py-8">No se han registrado pagos para este usuario.</p>';
+
+  openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold text-indigo-400">Historial de Pagos</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
+    + '<p class="text-sm text-neutral-400 mb-6">Usuario: <strong class="text-white">' + nombre + '</strong></p>'
+    + '<div class="space-y-3 max-h-[60vh] overflow-y-auto pr-2">' + histHtml + '</div>'
+  );
+};
+
 window.ejecutarFinanzas = async (e, action, p_id = null, directPayload = null) => {
    if (e) e.preventDefault();
 
@@ -1349,13 +1742,17 @@ window.ejecutarFinanzas = async (e, action, p_id = null, directPayload = null) =
    
    if (action === 'CREAR_FONDO') {
      const tipo = document.getElementById('fin-tipo').value;
+     const alcance = document.getElementById('fin-alcance') ? document.getElementById('fin-alcance').value : 'GENERAL';
      payload = {
        nombre: document.getElementById('fin-nombre').value,
        tipo: tipo,
+       alcance: alcance,
+       producto_id: alcance === 'PRODUCTO_ESPECIFICO' ? (document.getElementById('fin-producto-id')?.value || null) : null,
        porcentaje: tipo === 'PORCENTAJE' ? +(document.getElementById('fin-porcentaje').value || 0) : 0,
        monto_fijo: tipo === 'FIJO' ? +(document.getElementById('fin-monto-fijo').value || 0) : 0,
        dia_reset: tipo === 'FIJO' ? +(document.getElementById('fin-dia-reset').value || 1) : 1,
-       color: document.getElementById('fin-color').value
+       color: document.getElementById('fin-color').value,
+       prioridad: +document.getElementById('fin-prioridad').value
      };
      taskLabel = 'Nuevo Presupuesto: ' + payload.nombre;
    } else if (action === 'GASTAR_FONDO') {
@@ -1376,24 +1773,35 @@ window.ejecutarFinanzas = async (e, action, p_id = null, directPayload = null) =
      };
      taskLabel = 'Extrayendo Bs. ' + payload.monto + ' del capital';
    } else if (action === 'MODIFICAR_PRESUPUESTO') {
-     const tipo = document.getElementById('fin-mod-tipo').value;
-     payload = {
-        presupuesto_id: p_id,
-        nombre: document.getElementById('fin-mod-nombre').value,
-        color: document.getElementById('fin-mod-color').value
-     };
-     if (tipo === 'PORCENTAJE') {
-        payload.porcentaje = +document.getElementById('fin-mod-porcentaje').value;
-     } else {
+      const tipo = document.getElementById('fin-mod-tipo').value;
+      payload.presupuesto_id = p_id;
+      payload.nombre = document.getElementById('fin-mod-nombre').value;
+      payload.tipo = tipo;
+      payload.color = document.getElementById('fin-mod-color').value;
+      payload.prioridad = +document.getElementById('fin-mod-prioridad').value;
+      
+      if (tipo === 'PORCENTAJE') payload.porcentaje = +document.getElementById('fin-mod-porcentaje').value;
+      else if (tipo === 'FIJO') {
         payload.monto_fijo = +document.getElementById('fin-mod-fijo').value;
         payload.dia_reset = +document.getElementById('fin-mod-reset').value;
-     }
-     taskLabel = 'Actualizando Presupuesto: ' + payload.nombre;
+      }
+      taskLabel = 'Actualizando Presupuesto: ' + payload.nombre;
    } else if (action === 'CREAR_COMISION') {
      payload = {usuario_id: +document.getElementById('fin-comision-usuario').value, porcentaje: +document.getElementById('fin-comision-pct').value};
      taskLabel = 'Nueva Comisión: ' + payload.porcentaje + '%';
    } else if (action === 'ELIMINAR_COMISION') {
      taskLabel = 'Eliminando comisión';
+   } else if (action === 'PAGAR_COMISION') {
+     payload = {
+       usuario_id: +document.getElementById('pagar-comision-usuario').value,
+       monto: +document.getElementById('pagar-comision-monto').value,
+       descripcion: document.getElementById('pagar-comision-desc').value
+     };
+     taskLabel = 'Registrando pago de Bs. ' + payload.monto;
+   } else if (action === 'TRANSFERIR_FONDOS') {
+     taskLabel = 'Abonando Bs. ' + payload.monto + ' a cuenta';
+   } else if (action === 'LIQUIDAR_PRESUPUESTO') {
+     taskLabel = 'Liquidando cuenta (' + payload.disponible + ' Bs)';
    } else {
      taskLabel = action;
    }
@@ -1412,4 +1820,226 @@ window.ejecutarFinanzas = async (e, action, p_id = null, directPayload = null) =
        NotifEngine.error(taskId, 'Error: ' + String(err));
      }
    })();
+};
+
+// ====== WHATSAPP PREVIEW ======
+window.updateWhatsappPreview = () => {
+  const nameEl = document.getElementById('inv-prod');
+  const priceEl = document.getElementById('inv-venta');
+  const customMsg = document.getElementById('inv-cat-whatsapp')?.value || '';
+  const name = nameEl?.value || '[NOMBRE]';
+  const price = priceEl?.value || '[PRECIO]';
+  const textEl = document.getElementById('inv-cat-wa-text');
+  if (!textEl) return;
+  let msg = customMsg || `Hola Vaxon! Estoy Interesad@ en: ${name} Precio: BS ${price}`;
+  if (customMsg) msg = customMsg.replace('[NOMBRE]', name).replace('[PRECIO]', price);
+  textEl.textContent = msg;
+};
+
+// ====== COMBOS TAB ======
+window.renderInventarioComboTab = async () => {
+  invSubTab = 'combos';
+  try { allCombos = await api('/combos'); } catch(e) { allCombos = []; }
+  if(window.currentActiveView !== 'inventario') return;
+
+  const tabsHtml = `
+    <div class="flex items-center gap-3 mb-6">
+      <div class="bg-neutral-950 p-1.5 rounded-xl border border-neutral-800 flex gap-1.5">
+        <button onclick="invSubTab='productos'; renderInventario()" class="text-neutral-500 hover:text-white text-xs font-bold px-5 py-2.5 rounded-lg transition-all">📦 Productos</button>
+        <button onclick="invSubTab='combos'; renderInventarioComboTab()" class="bg-indigo-600 text-white text-xs font-bold px-5 py-2.5 rounded-lg transition-all">🎁 Combos</button>
+      </div>
+      <div class="flex-1"></div>
+      <button onclick="renderComboModal()" class="bg-indigo-600 px-6 py-3 rounded-2xl shadow-lg font-bold text-sm">+ Nuevo Combo</button>
+    </div>
+  `;
+
+  const combosHtml = allCombos.length === 0
+    ? '<div class="bg-neutral-900 border border-neutral-800 p-12 text-center rounded-[2rem]"><p class="text-neutral-500">No hay combos creados aún</p></div>'
+    : '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">' + allCombos.map(c => {
+      const items = c.items || [];
+      const itemList = items.map(i => `<span class="text-[11px] bg-neutral-800 px-2 py-0.5 rounded-lg">${i.producto_nombre} x${i.cantidad}</span>`).join(' ');
+      return `<div class="bg-neutral-900 border border-neutral-800 rounded-[2rem] overflow-hidden">
+        <div class="w-full h-36 bg-neutral-950 flex items-center justify-center relative">
+          ${c.imagen_url ? `<img src="${c.imagen_url}" class="object-cover w-full h-full" />` : '<span class="text-4xl">🎁</span>'}
+          <span class="absolute top-3 right-3 bg-indigo-600 text-white text-[10px] font-bold px-2 py-1 rounded-lg">COMBO</span>
+        </div>
+        <div class="p-5">
+          <p class="font-bold text-lg mb-1">${c.nombre}</p>
+          <div class="flex flex-wrap gap-1 mb-3">${itemList}</div>
+          <div class="flex justify-between items-end mb-3">
+            <span class="text-xs text-neutral-400">Costo: Bs. ${c.costoTotal?.toFixed(2) || '0.00'}</span>
+            <span class="font-bold text-lg text-emerald-400">Bs. ${c.precio_venta.toFixed(2)}</span>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="editComboModal(${c.id})" class="flex-1 bg-neutral-800 text-xs text-neutral-400 hover:bg-indigo-600 hover:text-white py-2 rounded-xl transition-colors font-bold">Editar</button>
+            <button onclick="deleteCombo(${c.id})" class="bg-red-500/10 text-red-400 text-xs font-bold px-4 py-2 rounded-xl hover:bg-red-500/20 transition-colors">Eliminar</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('') + '</div>';
+
+  appContent.innerHTML = `<div class="animate-[fadeInZoom_0.3s_ease-out]">${tabsHtml}${combosHtml}</div>`;
+};
+
+// ====== COMBO MODAL (Create) ======
+window._comboItems = [];
+
+window.renderComboModal = () => {
+  window._comboItems = [];
+  const prodOpts = allProductos.map(p => `<option value="${p.id}" data-nombre="${p.producto}">${p.producto} (${p.modelo}) | Stock: ${p.cantidad}</option>`).join('');
+  
+  openModal(`
+    <h3 class="text-2xl font-bold mb-4">🎁 Nuevo Combo</h3>
+    <form onsubmit="saveCombo(event)" class="space-y-4">
+      <div><label class="text-xs text-neutral-400">Nombre del Combo</label>
+        <input type="text" id="combo-nombre" required class="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 outline-none focus:border-indigo-500" placeholder="Combo Hogar Completo">
+      </div>
+      <div><label class="text-xs font-bold text-emerald-400">Precio de Venta del Combo (Bs)</label>
+        <input type="number" step="0.01" id="combo-precio" required class="w-full bg-neutral-950 border border-emerald-500/30 rounded-xl px-4 py-3 outline-none font-bold text-lg text-emerald-400 text-center" value="0">
+      </div>
+      <div>
+        <label class="text-xs text-neutral-400 block mb-2">Productos del Combo</label>
+        <div class="flex gap-2 mb-2">
+          <select id="combo-prod-select" class="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm outline-none">
+            <option value="">— Seleccionar producto —</option>${prodOpts}
+          </select>
+          <input type="number" id="combo-prod-qty" value="1" min="1" class="w-20 bg-neutral-950 border border-neutral-800 rounded-xl px-2 py-2 text-center font-bold text-sm outline-none">
+          <button type="button" onclick="addComboItem()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-xs font-bold text-white transition-colors">Agregar</button>
+        </div>
+        <div id="combo-items-list" class="space-y-2"></div>
+      </div>
+      <div>
+        <label class="text-xs text-neutral-400 block mb-1">Imagen del Combo (Opcional)</label>
+        <input type="file" id="combo-file" accept="image/*" class="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-neutral-800 file:text-white">
+      </div>
+      <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-neutral-800">
+        <button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>
+        <button type="submit" class="bg-indigo-600 px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg text-white">Crear Combo</button>
+      </div>
+    </form>
+  `);
+};
+
+window.addComboItem = () => {
+  const sel = document.getElementById('combo-prod-select');
+  const qty = +document.getElementById('combo-prod-qty').value;
+  if (!sel.value || qty < 1) return;
+  const prodId = +sel.value;
+  const prodName = sel.options[sel.selectedIndex].getAttribute('data-nombre');
+  // Check if already added
+  if (window._comboItems.find(i => i.producto_id === prodId)) {
+    NotifEngine.toast('Este producto ya está en el combo', 'warning');
+    return;
+  }
+  window._comboItems.push({ producto_id: prodId, cantidad: qty, producto_nombre: prodName });
+  renderComboItemsList();
+};
+
+window.removeComboItem = (prodId) => {
+  window._comboItems = window._comboItems.filter(i => i.producto_id !== prodId);
+  renderComboItemsList();
+};
+
+function renderComboItemsList() {
+  const list = document.getElementById('combo-items-list');
+  if (!list) return;
+  list.innerHTML = window._comboItems.length === 0
+    ? '<p class="text-neutral-600 text-xs text-center py-3">Agrega productos al combo</p>'
+    : window._comboItems.map(i => `
+      <div class="flex items-center justify-between bg-neutral-950 border border-neutral-800 p-3 rounded-xl">
+        <span class="text-sm font-bold">${i.producto_nombre} <span class="text-neutral-500 font-normal">x${i.cantidad}</span></span>
+        <button type="button" onclick="removeComboItem(${i.producto_id})" class="text-red-400 hover:text-red-300 text-xs font-bold">✕</button>
+      </div>
+    `).join('');
+}
+
+window.saveCombo = async (e) => {
+  e.preventDefault();
+  if (window._comboItems.length === 0) { NotifEngine.toast('Agrega al menos un producto al combo', 'warning'); return; }
+  const nombre = document.getElementById('combo-nombre').value;
+  const precio_venta = +document.getElementById('combo-precio').value;
+  const fileInput = document.getElementById('combo-file');
+  let fileDataURL = null;
+  if (fileInput && fileInput.files.length > 0) {
+    fileDataURL = await new Promise(resolve => { const r = new FileReader(); r.onload = ev => resolve(ev.target.result); r.readAsDataURL(fileInput.files[0]); });
+  }
+  const items = [...window._comboItems];
+  closeModal();
+  const taskId = NotifEngine.addTask('Nuevo Combo: ' + nombre, 'Creando combo...');
+  (async () => {
+    try {
+      let img_url = null;
+      if (fileDataURL) {
+        NotifEngine.updateProgress(taskId, 30, 'Subiendo imagen...');
+        const upRes = await api('/upload', 'POST', { fileBase64: fileDataURL });
+        img_url = upRes.url;
+      }
+      NotifEngine.updateProgress(taskId, 70, 'Guardando combo...');
+      await api('/combos', 'POST', { nombre, precio_venta, imagen_url: img_url, items });
+      NotifEngine.success(taskId, '✓ Combo creado: ' + nombre);
+      window.clearCache(); window._bumpLocalVersion();
+      if (window.currentActiveView === 'inventario') renderInventarioComboTab();
+    } catch(err) { NotifEngine.error(taskId, 'Error: ' + String(err)); }
+  })();
+};
+
+window.editComboModal = async (id) => {
+  const combo = allCombos.find(c => c.id === id);
+  if (!combo) return;
+  window._comboItems = (combo.items || []).map(i => ({ producto_id: i.producto_id, cantidad: i.cantidad, producto_nombre: i.producto_nombre }));
+  const prodOpts = allProductos.map(p => `<option value="${p.id}" data-nombre="${p.producto}">${p.producto} (${p.modelo})</option>`).join('');
+  openModal(`
+    <h3 class="text-2xl font-bold mb-4">🎁 Editar Combo: ${combo.nombre}</h3>
+    <form onsubmit="saveEditCombo(event, ${combo.id})" class="space-y-4">
+      <div><label class="text-xs text-neutral-400">Nombre</label>
+        <input type="text" id="combo-nombre" required value="${combo.nombre}" class="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 outline-none">
+      </div>
+      <div><label class="text-xs font-bold text-emerald-400">Precio de Venta (Bs)</label>
+        <input type="number" step="0.01" id="combo-precio" required value="${combo.precio_venta}" class="w-full bg-neutral-950 border border-emerald-500/30 rounded-xl px-4 py-3 outline-none font-bold text-lg text-emerald-400 text-center">
+      </div>
+      <div>
+        <label class="text-xs text-neutral-400 block mb-2">Productos del Combo</label>
+        <div class="flex gap-2 mb-2">
+          <select id="combo-prod-select" class="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm outline-none"><option value="">— Seleccionar —</option>${prodOpts}</select>
+          <input type="number" id="combo-prod-qty" value="1" min="1" class="w-20 bg-neutral-950 border border-neutral-800 rounded-xl px-2 py-2 text-center font-bold text-sm outline-none">
+          <button type="button" onclick="addComboItem()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-xs font-bold text-white">Agregar</button>
+        </div>
+        <div id="combo-items-list" class="space-y-2"></div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-neutral-800">
+        <button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>
+        <button type="submit" class="bg-indigo-600 px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg text-white">Actualizar Combo</button>
+      </div>
+    </form>
+  `);
+  renderComboItemsList();
+};
+
+window.saveEditCombo = async (e, id) => {
+  e.preventDefault();
+  if (window._comboItems.length === 0) { NotifEngine.toast('Agrega al menos un producto', 'warning'); return; }
+  const nombre = document.getElementById('combo-nombre').value;
+  const precio_venta = +document.getElementById('combo-precio').value;
+  const items = [...window._comboItems];
+  closeModal();
+  const taskId = NotifEngine.addTask('Editando Combo', 'Actualizando...');
+  (async () => {
+    try {
+      await api('/combos/' + id, 'PUT', { nombre, precio_venta, items });
+      NotifEngine.success(taskId, '✓ Combo actualizado');
+      window.clearCache(); window._bumpLocalVersion();
+      if (window.currentActiveView === 'inventario') renderInventarioComboTab();
+    } catch(err) { NotifEngine.error(taskId, 'Error: ' + String(err)); }
+  })();
+};
+
+window.deleteCombo = async (id) => {
+  if (!confirm('¿Eliminar este combo?')) return;
+  const taskId = NotifEngine.addTask('Eliminando combo', 'Procesando...');
+  try {
+    await api('/combos/' + id, 'DELETE');
+    NotifEngine.success(taskId, '✓ Combo eliminado');
+    window.clearCache(); window._bumpLocalVersion();
+    if (window.currentActiveView === 'inventario') renderInventarioComboTab();
+  } catch(err) { NotifEngine.error(taskId, 'Error: ' + String(err)); }
 };

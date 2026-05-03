@@ -17,6 +17,8 @@ app.use('/api/caja', require('../server/caja'));
 app.use('/api/finanzas', require('../server/finanzas'));
 app.use('/api/upload', require('../server/upload'));
 app.use('/api/sync', require('../server/sync'));
+app.use('/api/combos', require('../server/combos'));
+app.use('/api/catalog', require('../server/catalog'));
 
 app.get('/api', (req, res) => res.json({ message: 'VAXON Express API Running' }));
 

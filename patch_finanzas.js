@@ -16,7 +16,7 @@ const newEgresoModal = `window.openEgresoModal = async (caja_id) => {
   }).join('');
 
   openModal('<div class="flex justify-between items-center mb-4"><h3 class="text-2xl font-bold text-red-500">Salida Operativa</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
-    + '<form onsubmit="actionCaja(event, \\\\\'TRANSACCION\\\\\', \\\\\'EGRESO\\\\\', ' + caja_id + ')" class="space-y-4">'
+    + '<form onsubmit="actionCaja(event, \\'TRANSACCION\\', \\'EGRESO\\', ' + caja_id + ')" class="space-y-4">'
     + '<div><label class="text-xs text-neutral-400">Presupuesto / Etiqueta</label><select id="trans-presupuesto" class="w-full bg-neutral-950 border border-neutral-800 p-3 rounded-xl text-sm outline-none" onchange="updateBudgetInfo()"><option value="">— Egreso Libre (sin presupuesto) —</option>' + budgetOpts + '</select></div>'
     + '<div id="budget-info-bar" class="hidden bg-amber-950/30 border border-amber-500/20 p-3 rounded-xl text-sm"><span class="text-amber-400 font-bold">Disponible: </span><span id="budget-disp-val" class="font-mono font-bold text-amber-300">Bs. 0.00</span></div>'
     + '<div><label class="text-xs text-neutral-400">Monto A Retirar (Bs)</label><input type="number" step="0.01" id="trans-monto" class="w-full bg-neutral-950 border border-neutral-800 p-4 text-center font-bold text-3xl font-mono text-red-400 rounded-xl outline-none" required></div>'
@@ -42,7 +42,7 @@ window.updateBudgetInfo = () => {
 lines.splice(egresoStart, egresoEnd - egresoStart + 1, newEgresoModal);
 
 // Now find finanzas section and replace it 
-const finStart = lines.findIndex(l => l.includes('FINANZAS & CHART'));
+const finStart = lines.findIndex(l => l.includes('// ====== FINANZAS V2 ======'));
 const finEnd = lines.findIndex((l, i) => i > finStart && l.includes('renderProveedores'));
 
 const newFinanzas = `// ====== FINANZAS V2 ======
@@ -73,8 +73,8 @@ async function renderFinanzas() {
       + (p.fondos_extra > 0 ? '<span>+ Extra: Bs. ' + p.fondos_extra.toFixed(2) + '</span>' : '')
       + '<span>Gastado: Bs. ' + p.total_gastado.toFixed(2) + '</span></div>'
       + '<div class="flex gap-2">'
-      + '<button onclick="gastarFondoModal(' + p.id + ', \\'' + p.nombre.replace(/'/g, "\\\\'") + '\\')" class="flex-1 text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 p-2 rounded-lg border border-red-500/10 transition-colors">Gastar</button>'
-      + '<button onclick="agregarFondoExtraModal(' + p.id + ', \\'' + p.nombre.replace(/'/g, "\\\\'") + '\\')" class="flex-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 p-2 rounded-lg border border-emerald-500/10 transition-colors">+ Fondo</button>'
+      + '<button onclick="gastarFondoModal(' + p.id + ', \\'' + p.nombre.replace(/'/g, "\\'") + '\\')" class="flex-1 text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 p-2 rounded-lg border border-red-500/10 transition-colors">Gastar</button>'
+      + '<button onclick="agregarFondoExtraModal(' + p.id + ', \\'' + p.nombre.replace(/'/g, "\\'") + '\\')" class="flex-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 p-2 rounded-lg border border-emerald-500/10 transition-colors">+ Fondo</button>'
       + '<button onclick="verDetallePresupuesto(' + p.id + ')" class="flex-1 text-[11px] font-bold text-neutral-400 bg-neutral-800 hover:bg-neutral-700 p-2 rounded-lg transition-colors">Detalle</button>'
       + '</div></div>';
   }).join('');
@@ -143,7 +143,7 @@ async function renderFinanzas() {
 
 window.crearPresupuestoModal = () => {
   openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Nuevo Presupuesto</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
-    + '<form onsubmit="ejecutarFinanzas(event, \\\\\'CREAR_FONDO\\\\\\')" class="space-y-4">'
+    + '<form onsubmit="ejecutarFinanzas(event, \\'CREAR_FONDO\\')" class="space-y-4">'
     + '<div><label class="text-xs text-neutral-400">Nombre de la Etiqueta</label><input type="text" id="fin-nombre" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none" placeholder="Alquiler, Luz, Marketing..."></div>'
     + '<div><label class="text-xs text-neutral-400">Tipo</label><select id="fin-tipo" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold" onchange="toggleFinTipo()"><option value="PORCENTAJE">Porcentaje de Ganancia Bruta</option><option value="FIJO">Monto Fijo Mensual</option></select></div>'
     + '<div id="fin-pct-row"><label class="text-xs text-neutral-400">Porcentaje (%)</label><input type="number" step="0.01" id="fin-porcentaje" class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono" placeholder="15"></div>'
@@ -163,7 +163,7 @@ window.toggleFinTipo = () => {
 
 window.gastarFondoModal = (id, nombre) => {
   openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Gasto de \\'' + nombre + '\\'</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
-    + '<form onsubmit="ejecutarFinanzas(event, \\\\\'GASTAR_FONDO\\\\\\', ' + id + ')" class="space-y-4">'
+    + '<form onsubmit="ejecutarFinanzas(event, \\'GASTAR_FONDO\\', ' + id + ')" class="space-y-4">'
     + '<div><label class="text-xs text-neutral-400">Importe (Bs)</label><input type="number" step="0.01" id="fin-gasto-monto" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono text-center text-3xl"></div>'
     + '<div><label class="text-xs text-neutral-400">Descripción</label><input type="text" id="fin-gasto-desc" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none"></div>'
     + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
@@ -172,7 +172,7 @@ window.gastarFondoModal = (id, nombre) => {
 
 window.agregarFondoExtraModal = (id, nombre) => {
   openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Fondo Extra: \\'' + nombre + '\\'</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
-    + '<form onsubmit="ejecutarFinanzas(event, \\\\\'AGREGAR_FONDO_EXTRA\\\\\\', ' + id + ')" class="space-y-4">'
+    + '<form onsubmit="ejecutarFinanzas(event, \\'AGREGAR_FONDO_EXTRA\\', ' + id + ')" class="space-y-4">'
     + '<div><label class="text-xs text-neutral-400">Monto Extraordinario (Bs)</label><input type="number" step="0.01" id="fin-gasto-monto" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono text-center text-3xl text-emerald-400"></div>'
     + '<div><label class="text-xs text-neutral-400">Descripción</label><input type="text" id="fin-gasto-desc" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none" placeholder="Fondo extra mes de diciembre..."></div>'
     + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
@@ -197,7 +197,7 @@ window.verDetallePresupuesto = async (id) => {
     + '<div class="grid grid-cols-3 gap-3 mb-4 text-sm"><div class="bg-neutral-950 p-3 rounded-xl text-center"><p class="text-[10px] text-neutral-500">Gastos</p><p class="font-bold text-red-400 font-mono">-' + totalGastos.toFixed(2) + '</p></div>'
     + '<div class="bg-neutral-950 p-3 rounded-xl text-center"><p class="text-[10px] text-neutral-500">Fondos Extra</p><p class="font-bold text-emerald-400 font-mono">+' + totalFondos.toFixed(2) + '</p></div>'
     + '<div class="bg-neutral-950 p-3 rounded-xl text-center"><p class="text-[10px] text-neutral-500">Tipo</p><p class="font-bold text-indigo-400">' + (p.tipo === 'FIJO' ? 'Fijo: Bs.' + p.monto_fijo : p.porcentaje_asignacion + '%') + '</p></div></div>'
-    + (p.tipo === 'FIJO' ? '<div class="bg-amber-950/30 border border-amber-500/20 p-3 rounded-xl text-xs mb-4 flex justify-between"><span class="text-amber-400">Reset mensual el día ' + p.dia_reset + '</span><button onclick="resetPresupuesto(' + p.id + ', \\'' + p.nombre.replace(/'/g, "\\\\'") + '\\')" class="text-amber-400 font-bold hover:text-amber-300 underline">Resetear ahora</button></div>' : '')
+    + (p.tipo === 'FIJO' ? '<div class="bg-amber-950/30 border border-amber-500/20 p-3 rounded-xl text-xs mb-4 flex justify-between"><span class="text-amber-400">Reset mensual el día ' + p.dia_reset + '</span><button onclick="resetPresupuesto(' + p.id + ', \\'' + p.nombre.replace(/'/g, "\\'") + '\\')" class="text-amber-400 font-bold hover:text-amber-300 underline">Resetear ahora</button></div>' : '')
     + '<div class="overflow-y-auto max-h-[300px] space-y-2"><h4 class="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">Movimientos (' + (p.movimientos || []).length + ')</h4>'
     + movs
     + ((p.movimientos || []).length === 0 ? '<p class="text-neutral-600 text-sm py-4 text-center">Sin movimientos</p>' : '')
@@ -233,7 +233,7 @@ window.crearComisionModal = () => {
 
   openModal('<div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold">Asignar Comisión</h3><button onclick="closeModal()" class="text-neutral-500 hover:text-white transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>'
     + '<p class="text-xs text-neutral-500 mb-4">La comisión se calcula sobre la <b class="text-indigo-400">Ganancia Real</b> (lo que sobra después de todos los presupuestos).</p>'
-    + '<form onsubmit="ejecutarFinanzas(event, \\\\\'CREAR_COMISION\\\\\\')" class="space-y-4">'
+    + '<form onsubmit="ejecutarFinanzas(event, \\'CREAR_COMISION\\')" class="space-y-4">'
     + '<div><label class="text-xs text-neutral-400">Usuario</label><select id="fin-comision-usuario" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none">' + userOpts + '</select></div>'
     + '<div><label class="text-xs text-neutral-400">Porcentaje de Ganancia Real (%)</label><input type="number" step="0.01" max="100" id="fin-comision-pct" required class="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-xl outline-none font-bold font-mono text-center text-2xl" placeholder="25"></div>'
     + '<div class="flex gap-3 mt-4"><button type="button" onclick="closeModal()" class="px-5 py-2.5 text-sm font-medium text-neutral-400">Cancelar</button>'
